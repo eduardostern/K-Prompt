@@ -10,6 +10,7 @@ import romTk90xUrl from './roms/tk90x.rom?url';
 import romTk95Url from './roms/tk95.rom?url';
 import rom128Url from './roms/128k.rom?url';
 import romPlus2Url from './roms/plus2.rom?url';
+import romTs2068Url from './roms/ts2068.rom?url';
 import termTapUrl from './programs/TERM.tap?url';
 import ulaTapUrl from './programs/ULA.tap?url';
 import { inPhoneBook } from './phonebook';
@@ -19,7 +20,7 @@ import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { layoutFor } from './zx/legend';
 import { Model, MODELS, Spectrum, TK_VIDEO, TkVideo } from './zx/machine';
-import { isSnapshot, loadSnapshot, saveZ80, snapshotKind } from './zx/snapshot';
+import { isSnapshot, loadSnapshot, machineKind, saveZ80, snapshotKind } from './zx/snapshot';
 import { programTape, tokenize } from './zx/basic';
 import { blankTape, parseTape, Tape } from './zx/tape';
 import { HEIGHT, WIDTH } from './zx/ula';
@@ -91,12 +92,13 @@ async function bytes(url: string): Promise<Uint8Array> {
 }
 
 const ROM_URLS: Record<Model, string> = {
-  '48k': rom48Url, tk90x: romTk90xUrl, tk95: romTk95Url, '128k': rom128Url, plus2: romPlus2Url,
+  '48k': rom48Url, tk90x: romTk90xUrl, tk95: romTk95Url, '128k': rom128Url, plus2: romPlus2Url, ts2068: romTs2068Url,
 };
 
 /** The name on the case, for the badge. */
 const BADGES: Record<Model, string> = {
   '48k': 'ZX Spectrum', tk90x: 'TK 90X', tk95: 'TK 95', '128k': 'ZX Spectrum 128', plus2: 'ZX Spectrum +2',
+  ts2068: 'Timex Sinclair 2068',
 };
 
 async function start(): Promise<void> {
@@ -110,8 +112,16 @@ async function start(): Promise<void> {
   const wrap = $('screen-wrap');
   const canvas = $<HTMLCanvasElement>('screen');
   const g = canvas.getContext('2d')!;
-  const image = g.createImageData(WIDTH, HEIGHT);
-  const pixels = new Uint32Array(image.data.buffer);
+  // The TS2068 draws at double width (its 512-pixel mode); the canvas follows.
+  let image = g.createImageData(WIDTH, HEIGHT);
+  let pixels = new Uint32Array(image.data.buffer);
+  const fitCanvas = () => {
+    if (canvas.width === zx.ula.width) return;
+    canvas.width = zx.ula.width;
+    image = g.createImageData(zx.ula.width, HEIGHT);
+    pixels = new Uint32Array(image.data.buffer);
+  };
+  fitCanvas();
   let running = false;
 
   const draw = () => {
@@ -120,7 +130,7 @@ async function start(): Promise<void> {
   };
   const blank = () => {
     g.fillStyle = '#000';
-    g.fillRect(0, 0, WIDTH, HEIGHT);
+    g.fillRect(0, 0, canvas.width, HEIGHT);
   };
   blank();
 
@@ -133,7 +143,7 @@ async function start(): Promise<void> {
     badge.textContent = BADGES[settings.model];
     document.body.classList.toggle('tk', MODELS[settings.model].tk);
     tkVideoField.hidden = !MODELS[settings.model].tk;
-    $('ay48-field').hidden = Boolean(MODELS[settings.model].paged); // the 128K has its own
+    $('ay48-field').hidden = Boolean(MODELS[settings.model].paged || MODELS[settings.model].timex); // these have their own
     document.body.classList.toggle('pal', isPal());
   };
   applyModel();
@@ -165,6 +175,7 @@ async function start(): Promise<void> {
     model.value = next;
     save();
     zx.setRom(roms[next], next);
+    fitCanvas();
     applyModel();
     drawKeyboard();
   }
@@ -440,8 +451,9 @@ async function start(): Promise<void> {
       if (isSnapshot(file.name)) {
         // A 128K snapshot needs a 128K (and a 48K one a 48K-like machine): switch if it must.
         const kind = snapshotKind(file.name, file.data);
-        if (kind === '128k' && !zx.paged) switchModel(settings.model === 'plus2' ? 'plus2' : '128k');
-        else if (kind === '48k' && zx.paged) switchModel('48k');
+        if (kind && kind !== machineKind(zx)) {
+          switchModel(kind === '128k' ? (settings.model === 'plus2' ? 'plus2' : '128k') : kind === 'ts2068' ? 'ts2068' : '48k');
+        }
         loadSnapshot(zx, file.name, file.data);
         if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
       } else {

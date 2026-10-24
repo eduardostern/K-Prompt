@@ -12,6 +12,13 @@
  * 0 1 0 y7 y6 y2 y1 y0 | y5 y4 y3 x7 x6 x5 x4 x3, and the attribute of each
  * 8×8 cell is at 5800h + (y/8)·32 + x/8: bit 7 FLASH, bit 6 BRIGHT, bits
  * 5–3 PAPER, bits 2–0 INK. FLASH swaps ink and paper every 16 frames.
+ *
+ * The Timex TS2068's SCLD adds screen modes, picked by port FFh (`dec`):
+ * bits 0–2 are the mode (0 standard; 1 the second screen at 6000h; 2
+ * "hi-colour", an attribute for every 8×1 pixels, at the bitmap's address
+ * + 2000h; 6 hi-res, 512 pixels across, the columns taken in turn from
+ * the two screens, in two colours set by bits 3–5, which also colour the
+ * border). The picture is then drawn at double width (`scale` 2).
  */
 
 /** Border shown around the display, in pixels (the full side border is 48). */
@@ -79,8 +86,13 @@ export function contentionTable(t: Timing): Uint8Array {
 const CELLS = WIDTH / 8;
 
 export class Ula {
-  /** The picture, WIDTH × HEIGHT. */
-  readonly frame = new Uint32Array(WIDTH * HEIGHT);
+  /** The picture, `width` × HEIGHT. */
+  frame = new Uint32Array(WIDTH * HEIGHT);
+  /** Screen pixels per Spectrum pixel across: 2 on a Timex, for its 512-pixel mode. */
+  scale = 1;
+  width = WIDTH;
+  /** The Timex SCLD's mode register (port FFh); 0 on other machines. */
+  dec = 0;
   border = 7;
   /** Border changes this frame: T-states and colours, in order. */
   private changeT: number[] = [];
@@ -118,6 +130,14 @@ export class Ula {
     const y = ((n / CELLS) | 0) - BORDER_TOP;
     const x = (n % CELLS) * 8 - BORDER_X;
     return this.timing.displayStart + y * this.timing.lineT + ((x + 8) >> 1);
+  }
+
+  /** Draws at double width (Timex) or not. */
+  setScale(scale: number): void {
+    if (scale === this.scale) return;
+    this.scale = scale;
+    this.width = WIDTH * scale;
+    this.frame = new Uint32Array(this.width * HEIGHT);
   }
 
   /** Sets the border at once, for the whole frame (reset, snapshots). */
@@ -173,18 +193,46 @@ export class Ula {
     const cell = n % CELLS;
     const y = row - BORDER_TOP;
     const x = cell * 8 - BORDER_X;
-    const o = row * WIDTH + cell * 8;
+    const scale = this.scale;
+    const o = row * this.width + cell * 8 * scale;
     if (y >= 0 && y < 192 && x >= 0 && x < 256) {
-      this.drawDisplay(y, x >> 3, o);
+      if (this.dec & 4) this.drawHires(y, x >> 3, o);
+      else this.drawDisplay(y, x >> 3, o);
       return;
     }
     const t0 = this.timing.displayStart + y * this.timing.lineT + (x >> 1);
     const out = this.frame;
+    const hires = this.dec & 4 ? PALETTE[this.hiresPaper()] : 0;
     for (let p = 0; p < 8; p += 2) {
-      const c = PALETTE[this.colourAt(t0 + (p >> 1))];
-      out[o + p] = c;
-      out[o + p + 1] = c;
+      const c = hires || PALETTE[this.colourAt(t0 + (p >> 1))];
+      for (let k = 0; k < 2 * scale; k++) out[o + p * scale + k] = c;
     }
+  }
+
+  /** The two colours of hi-res mode, as an attribute (DEC bits 3–5: ink; paper is its opposite). */
+  private hiresAttr(): number {
+    const c = (this.dec >> 3) & 7;
+    return 0x40 | ((~c & 7) << 3) | c;
+  }
+
+  private hiresPaper(): number {
+    return 8 | ((this.hiresAttr() >> 3) & 7);
+  }
+
+  /** Hi-res (Timex): 16 pixels per cell, from the two screens, or as the SCLD's odder modes say. */
+  private drawHires(y: number, col: number, o: number): void {
+    const mem = this.screen;
+    const line = (((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col;
+    const attrAt = 0x1800 + (y >> 3) * 32 + col;
+    const mode = this.dec & 7;
+    const data = mem[mode & 1 ? line + 0x2000 : line];
+    const data2 = mode === 6 ? mem[line + 0x2000] : mode === 7 ? data : mode === 5 ? mem[attrAt + 0x2000] : mem[attrAt];
+    const attr = this.hiresAttr();
+    const ink = PALETTE[(attr & 7) | 8];
+    const paper = PALETTE[((attr >> 3) & 7) | 8];
+    const out = this.frame;
+    const bits = (data << 8) | data2;
+    for (let b = 0x8000; b; b >>= 1) out[o++] = bits & b ? ink : paper;
   }
 
   /**
@@ -208,12 +256,19 @@ export class Ula {
   private drawDisplay(y: number, col: number, o: number): void {
     const mem = this.screen;
     const out = this.frame;
-    const attr = mem[0x1800 + (y >> 3) * 32 + col];
-    let bits = mem[(((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
+    const line = (((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col;
+    // Timex modes: the second screen (bit 0) and 8x1 attributes (bit 1).
+    const alt = this.dec & 1 ? 0x2000 : 0;
+    const attr = this.dec & 2 ? mem[line + 0x2000] : mem[0x1800 + (y >> 3) * 32 + col + alt];
+    let bits = mem[line + alt];
     if (attr & 0x80 && this.flashOn) bits ^= 0xff;
     const bright = attr & 0x40 ? 8 : 0;
     const ink = PALETTE[(attr & 7) | bright];
     const paper = PALETTE[((attr >> 3) & 7) | bright];
-    for (let b = 0x80; b; b >>= 1) out[o++] = bits & b ? ink : paper;
+    if (this.scale === 1) {
+      for (let b = 0x80; b; b >>= 1) out[o++] = bits & b ? ink : paper;
+    } else {
+      for (let b = 0x80; b; b >>= 1) { const c = bits & b ? ink : paper; out[o++] = c; out[o++] = c; }
+    }
   }
 }

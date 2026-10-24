@@ -1,7 +1,7 @@
 # K-Prompt — notes for Claude
 
-ZX Spectrum emulator for the browser in TypeScript: 48K, 128K and +2, and
-Microdigital's Brazilian clones (TK90X, TK95). Static site (Vite). Sibling of A-Prompt
+ZX Spectrum emulator for the browser in TypeScript: 48K, 128K and +2,
+Microdigital's Brazilian clones (TK90X, TK95), and the Timex Sinclair 2068. Static site (Vite). Sibling of A-Prompt
 (`~/cpm`, CP/M) and Ok-Prompt (`~/Ok-Prompt`, MSX); the Z80 core started
 as Ok-Prompt's copy of A-Prompt's and is now timed access by access (only
 here). Named after the flashing K cursor.
@@ -48,7 +48,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
 | `scripts/z80asm.ts`, `build-*.ts` | Assembler (from Ok-Prompt); `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
-| `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K (see `src/roms/README.md`) |
+| `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong
 
@@ -80,6 +80,17 @@ core tests, every bus event with its T-state) runs in `npm test`.
   reading such a port also writes 7FFDh (FUSE's quirk). The 128 editor
   rewrites 7FFDh from BANKM (5B5Ch). Tape traps fire only with ROM 1 (48
   BASIC) paged; `typeLoad()` picks Tape Loader on the menu (ENTER).
+- TS2068 (`timex`): 3.528 MHz, 224 T × 262 (58,688), paper at 9,169, no
+  floating bus or Kempston. The ROM file is the 16K home ROM then the 8K
+  EXROM; the tape routines are in the EXROM (SA-BYTES 0068h, SA/LD-RET
+  00E5h, LD-BYTES 00FCh: `TAPE_ENTRIES`), trapped while it is at 0000h. Port
+  F4h (HSR) puts the EXROM (DEC bit 7) or the empty dock over each 8K
+  chunk: `mapChunks()` copies, saving home RAM in `homeChunks`, and
+  `readOnly` blocks writes. Port FFh (DEC) is the screen mode (`ula.dec`,
+  drawn at `scale` 2, 704 px wide), bit 6 masks the interrupt. Ports are
+  fully decoded (FEh only for the ULA); AY at F5h/F6h, R14 reads the
+  joystick (active low: up 1, down 2, left 4, right 8, fire 80h; stick 1
+  when A8 is set). `.z80` hardware 128 keeps F4h/FFh in bytes 35/36.
 - The ULA answers every even port; keyboard half-row r is selected by a 0
   in address bit 8+r, and several rows AND together. Port 1Fh (A5 low) is
   Kempston. The core passes `A<<8|n` for `IN A,(n)` and BC for `IN r,(C)`.

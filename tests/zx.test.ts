@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { KEYS, Model, MODELS, Spectrum, TIMING_48K, TIMING_TK60, TkVideo } from '../src/zx/machine';
 import { BORDER_TOP, BORDER_X, contentionTable, HEIGHT, PALETTE, Ula, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
-import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
+import { loadSnapshot, saveSna, saveZ80, snapshotKind } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
 import { fiveBytes, programTape, tokenize } from '../src/zx/basic';
 
@@ -582,5 +582,114 @@ describe('128K and +2', () => {
     zx.cpu.cycles = 100; // top border: the floating bus reads FFh
     expect(zx.cpu.portIn(0x7ffd)).toBe(0xff);
     expect(zx.port7ffd).toBe(0xff); // bank 7, ROM 1, screen 7, locked
+  });
+});
+
+describe('Timex Sinclair 2068', () => {
+  const ts = (frames = 300) => boot('ts2068', frames);
+
+  it('boots to its banner and runs BASIC', () => {
+    const zx = ts();
+    expect(screen(zx)).toContain(MODELS.ts2068.banner);
+    zx.pressKeys([KEYS.ENTER]);
+    settle(zx);
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('2+2\n');
+    settle(zx);
+    expect(zx.screenText()[0]).toBe('4');
+  });
+
+  it('SAVEs and LOADs through the tape routines in its EXROM, at once', () => {
+    const zx = ts();
+    zx.pressKeys([KEYS.ENTER]);
+    zx.tape = blankTape();
+    zx.typeText('10');
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('7\n');
+    zx.pressKeys([KEYS.S]);
+    zx.typeText('"seven"\n');
+    settle(zx, 30);
+    zx.pressKeys([KEYS.ENTER]);
+    settle(zx, 120);
+    const tape = parseTap('seven.tap', zx.tape.toTap());
+    expect(tape.labels()).toEqual(['Program: seven']);
+    const other = ts();
+    other.tape = tape;
+    other.typeLoad();
+    settle(other, 60);
+    other.pressKeys([KEYS.R]);
+    other.typeText('\n');
+    settle(other);
+    expect(other.screenText()[0]).toBe('7');
+  });
+
+  it('draws 8x1 attributes in hi-colour mode and 512 pixels across in hi-res', () => {
+    const zx = ts();
+    const pix = (x: number, y: number) => zx.ula.frame[(BORDER_TOP + y) * zx.ula.width + BORDER_X * 2 + x];
+    zx.mem.fill(0, 0x4000, 0x8000);
+    // Hi-colour: pixel line 0 red paper, line 1 green paper, in the same cell.
+    zx.mem[0x6000] = 0x10;
+    zx.mem[0x6100] = 0x20;
+    zx.cpu.portOut(0x00ff, 2);
+    zx.runFrame(); zx.runFrame();
+    expect(pix(0, 0)).toBe(PALETTE[2]);
+    expect(pix(0, 1)).toBe(PALETTE[4]);
+    // Hi-res: the first byte of each screen makes 16 pixels; ink black on white (colour 0).
+    zx.mem[0x4000] = 0x80; // pixel 0
+    zx.mem[0x6000] = 0x01; // pixel 15
+    zx.cpu.portOut(0x00ff, 6);
+    zx.runFrame(); zx.runFrame();
+    expect(pix(0, 0)).toBe(PALETTE[8]); // black ink, BRIGHT
+    expect(pix(1, 0)).toBe(PALETTE[15]); // white paper
+    expect(pix(15, 0)).toBe(PALETTE[8]);
+    expect(zx.ula.frame[0]).toBe(PALETTE[15]); // the border takes the paper colour
+  });
+
+  it('plays its AY at F5h/F6h and reads the joystick through register 14', () => {
+    const zx = ts();
+    const ay = (r: number, v: number) => { zx.cpu.portOut(0xf5, r); zx.cpu.portOut(0xf6, v); };
+    ay(0, 252); ay(1, 0); ay(7, 0x3e); ay(8, 15);
+    zx.takeAudio();
+    const s: number[] = [];
+    for (let f = 0; f < 60; f++) { zx.runFrame(); s.push(...zx.takeAudio()); }
+    const mean = s.reduce((a, b) => a + b, 0) / s.length;
+    let up = 0;
+    for (let i = 1; i < s.length; i++) if (s[i - 1] < mean && s[i] >= mean) up++;
+    const want = 1_764_000 / 16 / 252;
+    expect(up / (s.length / 44100)).toBeGreaterThan(want * 0.98);
+    expect(up / (s.length / 44100)).toBeLessThan(want * 1.02);
+    zx.cpu.portOut(0xf5, 14);
+    zx.kempston = 0x10 | 0x08; // fire and up
+    expect(zx.cpu.portIn(0x01f6)).toBe(0xff & ~0x80 & ~0x01);
+    expect(zx.cpu.portIn(0x00f6)).toBe(0xff); // stick 1 not selected
+    expect(zx.cpu.portIn(0x1f)).toBe(0xff); // no Kempston, no floating bus
+  });
+
+  it('saves and loads a .z80 with its screen mode and memory map', () => {
+    const zx = ts();
+    zx.cpu.portOut(0xff, 0x82); // hi-colour, EXROM selected
+    zx.cpu.portOut(0xf4, 0x80); // the EXROM over E000h
+    zx.mem[0x6000] = 0x10;
+    const snap = saveZ80(zx);
+    expect(snapshotKind('x.z80', snap)).toBe('ts2068');
+    const other = ts(10);
+    loadSnapshot(other, 'x.z80', snap);
+    expect(other.dec).toBe(0x82);
+    expect(other.hsr).toBe(0x80);
+    expect(other.mem[0x6000]).toBe(0x10);
+    expect(Array.from(other.mem.subarray(0xe000, 0xe010))).toEqual(Array.from(rom('ts2068').subarray(0x4000, 0x4010)));
+    expect(() => loadSnapshot(boot('48k', 10), 'x.z80', snap)).toThrow(/TS2068/);
+    expect(() => saveSna(zx)).toThrow();
+  });
+
+  it('masks the interrupt with port FFh bit 6', () => {
+    const zx = ts();
+    const frames = () => zx.mem[0x5c78];
+    const a = frames();
+    zx.runFrame();
+    expect(frames()).toBe((a + 1) & 0xff);
+    zx.cpu.portOut(0xff, 0x40);
+    zx.runFrame(); zx.runFrame();
+    expect(frames()).toBe((a + 1) & 0xff);
   });
 });

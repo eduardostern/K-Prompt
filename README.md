@@ -26,8 +26,9 @@ floating bus.
 - **Listings**: paste a BASIC program as a magazine printed it; it is
   tokenized (numbers get their hidden 5-byte values), put on a tape with an
   autostart line, and loaded by the ROM's own LOAD.
-- **Snapshots**: `.z80` (versions 1 to 3) and `.sna`, 48K and 128K; save the
-  running machine as a `.z80`. A 128K snapshot switches to a 128K.
+- **Snapshots**: `.z80` (versions 1 to 3) and `.sna`, 48K and 128K, and
+  `.z80` for the TS2068; save the running machine as a `.z80`. A snapshot
+  switches to the machine it was made on.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),
   and an on-screen 48K keyboard shows every keyword and symbol; tap it on a
   phone. CAPS and SYMBOL SHIFT latch for one-finger typing.
@@ -47,7 +48,9 @@ floating bus.
 - **Machines**: ZX Spectrum 48K, TK90X, TK95, 128K and +2: the 128's menu
   and editor, its eight RAM banks and second screen, and the AY sound chip
   (which a 48K can have too, as an add-on). Pasted listings may use 128
-  BASIC's PLAY and SPECTRUM on a 128K.
+  BASIC's PLAY and SPECTRUM on a 128K. And the American Timex Sinclair
+  2068: its 60 Hz frame, hi-colour and 512-pixel screen modes, EXROM,
+  AY and joystick.
 
 ## Run
 

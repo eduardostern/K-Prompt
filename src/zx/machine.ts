@@ -15,6 +15,14 @@
  * until reset. Odd banks are contended. The AY sound chip is at FFFDh
  * (select, read) and BFFDh (write).
  *
+ * The Timex TS2068 replaces the ULA with the SCLD, fully decoded: FEh as
+ * the ULA, FFh the screen mode (see ula.ts; bit 6 masks the interrupt,
+ * bit 7 picks EXROM over the cartridge dock), F4h maps each 8K chunk of
+ * the 64K to the EXROM (an 8K ROM with the tape and cartridge code) or the
+ * dock instead of the home ROM and RAM. Its AY is at F5h (select) and F6h
+ * (data); register 14 reads the two joysticks. No floating bus, no
+ * Kempston.
+ *
  * I/O: every even port is the ULA (port FEh). OUT sets the border (bits
  * 0–2), MIC (bit 3) and EAR/beeper (bit 4); IN reads the keyboard half-rows
  * picked by the high address byte (bits 0–4) and EAR input (bit 6). Port
@@ -66,7 +74,10 @@ export const TIMING_TK50: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 
  */
 export const TIMING_128K: Timing = { clock: 3_546_900, lineT: 228, frameT: 70_908, displayStart: 14_362, intLength: 36, busPhase: 2 };
 
-export type Model = '48k' | 'tk90x' | 'tk95' | '128k' | 'plus2';
+/** The TS2068 (Timex's SCLD, NTSC): 3.528 MHz, 224 T × 262 lines, the first pixel at 9,169 (FUSE's). */
+export const TIMING_TS2068: Timing = { clock: 3_528_000, lineT: 224, frameT: 224 * 262, displayStart: 9_169, intLength: 32, busPhase: 2 };
+
+export type Model = '48k' | 'tk90x' | 'tk95' | '128k' | 'plus2' | 'ts2068';
 
 /** Which ULA a TK has: Microdigital's at 60 or 50 Hz, or a Ferranti one (some export boards). */
 export type TkVideo = '60' | '50' | 'ferranti';
@@ -84,6 +95,8 @@ export interface ModelInfo {
   tk: boolean;
   /** 128K memory (banks, two ROMs) and the AY. */
   paged?: boolean;
+  /** Timex's SCLD: screen modes, EXROM, its own ports and AY. */
+  timex?: boolean;
 }
 
 export const MODELS: Record<Model, ModelInfo> = {
@@ -92,16 +105,24 @@ export const MODELS: Record<Model, ModelInfo> = {
   tk95: { label: 'Microdigital TK95', banner: 'TK Color Computer', tk: true },
   '128k': { label: 'ZX Spectrum 128K', banner: '© 1986 Sinclair Research Ltd', tk: false, paged: true },
   plus2: { label: 'ZX Spectrum +2', banner: '©1986, ©1982 Amstrad Consumer', tk: false, paged: true },
+  ts2068: { label: 'Timex Sinclair 2068', banner: '© 1983 Timex Computer Cor', tk: false, timex: true },
 };
+
+/** Where each model's ROM keeps SA-BYTES, SA/LD-RET and LD-BYTES (the TS2068's are in its EXROM). */
+const TAPE_ENTRIES = { spectrum: [0x04c2, 0x053f, 0x0556], timex: [0x0068, 0x00e5, 0x00fc] };
+
+/** The ROM file's size for a model: 16K, both of a 128K's, or a TS2068's 16K and 8K EXROM. */
+export function romSize(model: Model): number {
+  return MODELS[model].paged ? 0x8000 : MODELS[model].timex ? 0x6000 : 0x4000;
+}
 
 /** The timing of a model, with a TK's choice of ULA. */
 export function timingOf(model: Model, tkVideo: TkVideo = '60'): Timing {
   if (MODELS[model].paged) return TIMING_128K;
+  if (MODELS[model].timex) return TIMING_TS2068;
   return MODELS[model].tk ? TK_VIDEO[tkVideo].timing : TIMING_48K;
 }
 
-// ROM entry points (the same in the 48K, TK90X and TK95 ROMs, and the 128K's 48 BASIC ROM).
-const SA_BYTES = 0x04c2, SA_LD_RET = 0x053f, LD_BYTES = 0x0556;
 
 /**
  * How long a typed key is held, and the gap after it, in frames. The ROM
@@ -136,6 +157,20 @@ export class Spectrum {
    * place (8000h or 4000h), so a write to either copy reaches both.
    */
   private alias = 0;
+  /** 8K chunks of the 64K the CPU may not write (ROM, or the TS2068's EXROM or dock). */
+  private readonly readOnly = Uint8Array.from([1, 1, 0, 0, 0, 0, 0, 0]);
+  /** TS2068: the EXROM, the SCLD's registers, and what each chunk holds now (0 home, 1 EXROM, 2 dock). */
+  private exrom = new Uint8Array(0x2000);
+  private readonly dock = new Uint8Array(0x2000).fill(0xff);
+  hsr = 0;
+  dec = 0;
+  private readonly chunkMap = new Uint8Array(8);
+  /** Home RAM put aside while the EXROM or the dock covers its chunk. */
+  private readonly homeChunks = Array.from({ length: 8 }, () => new Uint8Array(0x2000));
+  /** The tape routines' addresses in this model's ROM. */
+  private saBytes = 0x04c2;
+  private saLdRet = 0x053f;
+  private ldBytes = 0x0556;
   model: Model = '48k';
   /** The ULA of a TK model (ignored for the 48K). */
   tkVideo: TkVideo = '60';
@@ -181,7 +216,7 @@ export class Spectrum {
     const cpu = this.cpu;
     cpu.read = (a) => this.mem[a];
     cpu.write = (a, v) => {
-      if (a < 0x4000) return;
+      if (this.readOnly[a >> 13]) return;
       this.mem[a] = v;
       if (this.alias) {
         if (a >= 0xc000) this.mem[a - this.alias] = v;
@@ -195,10 +230,17 @@ export class Spectrum {
 
   /** Puts a ROM in (16K, or 32K for a 128K's two) and switches the machine's model; resets. */
   setRom(rom: Uint8Array, model: Model): void {
-    const want = MODELS[model].paged ? 0x8000 : 0x4000;
+    const want = romSize(model);
     if (rom.length !== want) throw new Error(`the ${MODELS[model].label} ROM is ${want / 1024}K`);
     this.roms = [];
-    for (let i = 0; i < rom.length; i += 0x4000) this.roms.push(rom.slice(i, i + 0x4000));
+    const timex = Boolean(MODELS[model].timex);
+    for (let i = 0; i < (timex ? 0x4000 : rom.length); i += 0x4000) this.roms.push(rom.slice(i, i + 0x4000));
+    if (timex) this.exrom = rom.slice(0x4000, 0x6000);
+    [this.saBytes, this.saLdRet, this.ldBytes] = TAPE_ENTRIES[timex ? 'timex' : 'spectrum'];
+    this.cpu.ulaPort = timex
+      ? (port) => { const lo = port & 0xff; return lo === 0xfe || lo === 0xff || lo === 0xf4; }
+      : (port) => !(port & 1);
+    this.ula.setScale(timex ? 2 : 1);
     this.model = model;
     this.applyTiming();
     this.reset();
@@ -219,8 +261,13 @@ export class Spectrum {
     return Boolean(MODELS[this.model].paged);
   }
 
+  /** Whether this is a Timex (the SCLD). */
+  get timex(): boolean {
+    return Boolean(MODELS[this.model].timex);
+  }
+
   private get ayOn(): boolean {
-    return this.paged || this.ay48;
+    return this.paged || this.ay48 || this.timex;
   }
 
   private applyTiming(): void {
@@ -242,6 +289,9 @@ export class Spectrum {
     for (const b of this.banks) b.fill(0);
     this.port7ffd = this.bankC = this.romSel = this.alias = 0;
     this.mem.set(this.roms[0], 0);
+    this.hsr = this.dec = this.ula.dec = 0;
+    this.chunkMap.fill(0);
+    this.readOnly.set([1, 1, 0, 0, 0, 0, 0, 0]);
     this.cpu.contendedPage.set([0, 1, 0, 0]);
     this.ula.screen = this.mem.subarray(0x4000, 0x8000);
     this.ay.reset();
@@ -300,9 +350,64 @@ export class Spectrum {
     this.page(v);
   }
 
-  /** Whether the ROM at 0000h is 48 BASIC (where the tape traps live). */
+  /** Whether the ROM with the tape routines is at 0000h: 48 BASIC, or the TS2068's EXROM. */
   private get basicRom(): boolean {
+    if (this.timex) return this.chunkMap[0] === 1;
     return this.romSel === this.roms.length - 1;
+  }
+
+  // ---- the TS2068's SCLD ----------------------------------------------------
+
+  /** Maps each 8K chunk to home, the EXROM or the dock, as HSR (F4h) and DEC bit 7 say. */
+  private mapChunks(): void {
+    for (let i = 0; i < 8; i++) {
+      const want = this.hsr & (1 << i) ? (this.dec & 0x80 ? 1 : 2) : 0;
+      const had = this.chunkMap[i];
+      if (want === had) continue;
+      const at = i * 0x2000;
+      if (had === 0 && i >= 2) this.homeChunks[i].set(this.mem.subarray(at, at + 0x2000));
+      if (want === 0) {
+        if (i < 2) this.mem.set(this.roms[0].subarray(at, at + 0x2000), at);
+        else this.mem.set(this.homeChunks[i], at);
+      } else this.mem.set(want === 1 ? this.exrom : this.dock, at);
+      this.chunkMap[i] = want;
+      this.readOnly[i] = want !== 0 || i < 2 ? 1 : 0;
+    }
+  }
+
+  /** Sets the SCLD's two registers (snapshots). */
+  setScld(hsr: number, dec: number): void {
+    this.hsr = hsr & 0xff;
+    this.setDec(dec);
+  }
+
+  /** Port FFh: the screen mode (drawn from now on), the interrupt mask, EXROM or dock. */
+  private setDec(v: number): void {
+    this.ula.catchUp(this.cpu.cycles);
+    this.dec = this.ula.dec = v & 0xff;
+    this.mapChunks();
+  }
+
+  /** The TS2068's joysticks through AY port A (F6h with R14): active low, stick 1 when A8 is set. */
+  private timexSticks(port: number): number {
+    let v = this.ay.regs[7] & 0x40 ? this.ay.regs[14] : 0xff;
+    if (port & 0x100) {
+      const k = this.kempston;
+      v &= ~((k & 8 ? 0x01 : 0) | (k & 4 ? 0x02 : 0) | (k & 2 ? 0x04 : 0) | (k & 1 ? 0x08 : 0) | (k & 0x10 ? 0x80 : 0));
+    }
+    return v & 0xff;
+  }
+
+  private timexIn(port: number): number {
+    const lo = port & 0xff;
+    if (lo === 0xfe) return this.ulaIn(port);
+    if (port === MODEM_STATUS) return this.modem.status();
+    if (port === MODEM_DATA) return this.modem.read();
+    if (lo === 0xff) return this.dec;
+    if (lo === 0xf4) return this.hsr;
+    if (lo === 0xf5) return this.ay.selectedRegister === 14 ? 0xff : this.ay.read();
+    if (lo === 0xf6) return this.ay.selectedRegister === 14 ? this.timexSticks(port) : this.ay.read();
+    return 0xff;
   }
 
   /** Writes a byte as the CPU would (both copies of an aliased bank). */
@@ -318,17 +423,21 @@ export class Spectrum {
     return v;
   }
 
+  /** Port FEh: the keyboard half-rows the high byte picks, and EAR. */
+  private ulaIn(port: number): number {
+    // Bit 6 is the EAR input: the tape while it plays; otherwise it follows
+    // EAR output, as on issue 3 boards.
+    let ear: number;
+    if (this.tape?.playing) {
+      this.playTape();
+      ear = this.tape.level ? 0x40 : 0;
+    } else ear = this.lastOut & 0x10 ? 0x40 : 0;
+    return 0xa0 | ear | this.matrix.read(port >> 8);
+  }
+
   private readPort(port: number): number {
-    if (!(port & 1)) {
-      // Bit 6 is the EAR input: the tape while it plays; otherwise it follows
-      // EAR output, as on issue 3 boards.
-      let ear: number;
-      if (this.tape?.playing) {
-        this.playTape();
-        ear = this.tape.level ? 0x40 : 0;
-      } else ear = this.lastOut & 0x10 ? 0x40 : 0;
-      return 0xa0 | ear | this.matrix.read(port >> 8);
-    }
+    if (this.timex) return this.timexIn(port);
+    if (!(port & 1)) return this.ulaIn(port);
     if (port === MODEM_STATUS) return this.modem.status();
     if (port === MODEM_DATA) return this.modem.read();
     if (this.ayOn && (port & 0xc002) === 0xc000) return this.ay.read();
@@ -354,12 +463,21 @@ export class Spectrum {
   private portOut(port: number, v: number): void {
     if (port === MODEM_STATUS) return this.modem.control(v);
     if (port === MODEM_DATA) return this.modem.write(v);
-    if (this.paged && !(port & 0x8002)) this.page(v);
-    if (this.ayOn && (port & 0x8002) === 0x8000) {
-      if (port & 0x4000) this.ay.select(v);
-      else this.ay.write(v, this.cpu.cycles);
+    if (this.timex) {
+      const lo = port & 0xff;
+      if (lo === 0xff) return this.setDec(v);
+      if (lo === 0xf4) { this.hsr = v & 0xff; this.mapChunks(); return; }
+      if (lo === 0xf5) return this.ay.select(v);
+      if (lo === 0xf6) return this.ay.write(v, this.cpu.cycles);
+      if (lo !== 0xfe) return;
+    } else {
+      if (this.paged && !(port & 0x8002)) this.page(v);
+      if (this.ayOn && (port & 0x8002) === 0x8000) {
+        if (port & 0x4000) this.ay.select(v);
+        else this.ay.write(v, this.cpu.cycles);
+      }
+      if (port & 1) return;
     }
-    if (port & 1) return;
     const t = this.cpu.cycles;
     if (this.tape?.playing) this.playTape(); // keep the speaker's events in order
     this.ula.catchUp(t);
@@ -374,8 +492,8 @@ export class Spectrum {
     const cpu = this.cpu;
     const { frameT, intLength } = this.ula.timing;
     while (cpu.cycles < frameT) {
-      if (cpu.cycles < intLength) cpu.interrupt(0xff);
-      if (this.tape && (cpu.pc === LD_BYTES || cpu.pc === SA_BYTES) && this.basicRom) this.tapeTrap();
+      if (cpu.cycles < intLength && !(this.dec & 0x40)) cpu.interrupt(0xff);
+      if (this.tape && (cpu.pc === this.ldBytes || cpu.pc === this.saBytes) && this.basicRom) this.tapeTrap();
       cpu.step();
       this.ula.catchUp(cpu.cycles);
     }
@@ -419,7 +537,7 @@ export class Spectrum {
   private tapeTrap(): void {
     const cpu = this.cpu;
     const tape = this.tape!;
-    if (cpu.pc === SA_BYTES) {
+    if (cpu.pc === this.saBytes) {
       const block = new Uint8Array(cpu.de + 2);
       block[0] = cpu.a;
       for (let i = 0; i < cpu.de; i++) block[1 + i] = this.mem[(cpu.ix + i) & 0xffff];
@@ -428,7 +546,7 @@ export class Spectrum {
       cpu.ix = (cpu.ix + cpu.de) & 0xffff;
       cpu.de = 0;
       cpu.f |= CF;
-      cpu.pc = SA_LD_RET;
+      cpu.pc = this.saLdRet;
       this.onTapeWritten?.(tape);
       return;
     }
@@ -457,7 +575,7 @@ export class Spectrum {
     cpu.ix = (cpu.ix + n) & 0xffff;
     cpu.de = (cpu.de - n) & 0xffff;
     if (ok) cpu.f |= CF; else cpu.f &= ~CF;
-    cpu.pc = SA_LD_RET;
+    cpu.pc = this.saLdRet;
   }
 
   /** The sound made since the last call. */

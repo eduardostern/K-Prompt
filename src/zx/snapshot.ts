@@ -23,8 +23,10 @@ export function isSnapshot(name: string): boolean {
 
 const w = (b: Uint8Array, i: number) => b[i] | (b[i + 1] << 8);
 
-/** Whether a snapshot is of a 48K or a 128K (null: not one K-Prompt reads). */
-export function snapshotKind(name: string, b: Uint8Array): '48k' | '128k' | null {
+export type SnapshotKind = '48k' | '128k' | 'ts2068';
+
+/** Which machine a snapshot is of (null: not one K-Prompt reads). */
+export function snapshotKind(name: string, b: Uint8Array): SnapshotKind | null {
   if (/\.sna$/i.test(name)) {
     if (b.length === SNA_48) return '48k';
     return b.length === SNA_128 || b.length === SNA_128 + 0x4000 ? '128k' : null;
@@ -34,18 +36,20 @@ export function snapshotKind(name: string, b: Uint8Array): '48k' | '128k' | null
   const extra = w(b, 30), hw = b[34];
   if (extra === 23) return hw <= 1 ? '48k' : hw === 3 || hw === 4 ? '128k' : null;
   if (hw <= 1 || hw === 3) return '48k';
+  if (hw === 128) return 'ts2068';
   return hw >= 4 && hw <= 6 || hw === 12 ? '128k' : null;
 }
+
+/** The kind of snapshot this machine makes and takes. */
+export const machineKind = (zx: Spectrum): SnapshotKind => (zx.paged ? '128k' : zx.timex ? 'ts2068' : '48k');
 
 const SNA_48 = 27 + 49152;
 const SNA_128 = SNA_48 + 4 + 5 * 0x4000;
 
 export function loadSnapshot(zx: Spectrum, name: string, bytes: Uint8Array): void {
   const kind = snapshotKind(name, bytes);
-  if (!kind) throw new Error('this snapshot is not of a 48K or a 128K');
-  if ((kind === '128k') !== zx.paged) {
-    throw new Error(kind === '128k' ? 'this snapshot needs a 128K' : 'this snapshot is of a 48K');
-  }
+  if (!kind) throw new Error('this snapshot is not of a 48K, a 128K or a TS2068');
+  if (kind !== machineKind(zx)) throw new Error(`this snapshot needs a ${kind === '48k' ? '48K' : kind === '128k' ? '128K' : 'TS2068'}`);
   if (/\.sna$/i.test(name)) loadSna(zx, bytes);
   else loadZ80(zx, bytes);
 }
@@ -88,6 +92,7 @@ function loadSna(zx: Spectrum, b: Uint8Array): void {
 }
 
 export function saveSna(zx: Spectrum): Uint8Array {
+  if (zx.timex) throw new Error('.sna has no room for the TS2068\'s screen modes: save a .z80');
   const cpu = zx.cpu;
   const paged = zx.paged;
   const n = zx.port7ffd & 7;
@@ -152,6 +157,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
   let paging = 0;
   let ay: Uint8Array | null = null;
   let aySel = 0;
+  let hsr = 0, dec = 0;
   if (pc !== 0) {
     // Version 1: 48K only, compressed if bit 5, ending with 00 ED ED 00.
     if (flags & 0x20) {
@@ -165,6 +171,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
     const hw = b[34];
     const is128 = zx.paged;
     paging = b[35];
+    if (hw === 128) { hsr = b[35]; dec = b[36]; }
     if (b[37] & 4) { aySel = b[38]; ay = b.slice(39, 55); }
     let i = 32 + extra;
     const where: Record<number, number> = { 8: 0x4000, 4: 0x8000, 5: 0xc000 };
@@ -188,7 +195,10 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
       for (let r = 0; r < 16; r++) { zx.ay.select(r); zx.ay.write(ay[r], 0); }
       zx.ay.select(aySel);
     }
-  } else zx.mem.set(mem.subarray(0x4000), 0x4000);
+  } else {
+    zx.mem.set(mem.subarray(0x4000), 0x4000);
+    if (zx.timex) zx.setScld(hsr, dec);
+  }
   cpu.a = b[0]; cpu.f = b[1];
   cpu.bc = w(b, 2); cpu.hl = w(b, 4); cpu.pc = pc; cpu.sp = w(b, 8);
   cpu.i = b[10];
@@ -227,6 +237,11 @@ export function saveZ80(zx: Spectrum): Uint8Array {
     for (let n = 0; n < 8; n++) pages.push([3 + n, zx.bank(n)]);
   } else {
     head[34] = 0;
+    if (zx.timex) {
+      head[34] = 128;
+      head[35] = zx.hsr;
+      head[36] = zx.dec;
+    }
     for (const [page, at] of [[8, 0x4000], [4, 0x8000], [5, 0xc000]]) pages.push([page, zx.mem.subarray(at, at + 0x4000)]);
   }
   const out = new Uint8Array(head.length + pages.length * (3 + 0x4000));
