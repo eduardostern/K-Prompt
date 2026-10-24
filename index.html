@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>K-Prompt · a ZX Spectrum in your browser</title>
+    <meta name="description" content="K-Prompt is a ZX Spectrum 48K emulator for the browser, with Microdigital's Brazilian clones, the TK90X and TK95. Load a tape and play." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div class="room">
+      <header class="top">
+        <h1 class="brand"><span class="k">K</span>-Prompt</h1>
+        <p class="tag">A ZX Spectrum in your browser. Load a tape and play. <a href="./history.html">The Spectrum story →</a></p>
+      </header>
+
+      <main class="stage">
+        <!-- Left: the machine -->
+        <aside class="panel" aria-label="Machine">
+          <h2>Machine</h2>
+          <div class="btn-row">
+            <button id="power" class="key-btn power-btn" type="button" aria-pressed="false">⏻ Power</button>
+            <button id="reset" class="key-btn" type="button">↻ Reset</button>
+          </div>
+          <label class="field">Model
+            <select id="model">
+              <option value="48k">ZX Spectrum 48K (1982)</option>
+              <option value="tk90x">Microdigital TK90X (1985)</option>
+              <option value="tk95">Microdigital TK95 (1986)</option>
+            </select>
+          </label>
+          <label class="field">Speed
+            <select id="speed">
+              <option value="1">Normal</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="fast-load" /> Load tapes at once</label>
+          <label class="check"><input type="checkbox" id="turbo-tape" /> Fast-forward while a tape plays</label>
+          <div class="btn-row">
+            <button id="snap-save" class="key-btn" type="button" title="Save the whole machine as a .z80 snapshot">⤓ Snapshot</button>
+          </div>
+          <dl class="readout">
+            <dt>Frames</dt><dd id="fps">–</dd>
+            <dt>CPU</dt><dd id="mhz">–</dd>
+          </dl>
+          <label class="check"><input type="checkbox" id="auto-power" /> Power on by itself</label>
+        </aside>
+
+        <!-- Centre: the monitor, the tape deck and the keyboard -->
+        <section class="center">
+          <div class="monitor">
+            <div class="screen-wrap" id="screen-wrap">
+              <canvas id="screen" width="352" height="288" aria-label="Spectrum screen"></canvas>
+              <div class="crt-roll" aria-hidden="true"></div>
+              <div class="crt-flicker" aria-hidden="true"></div>
+              <div class="drop-hint" aria-hidden="true">Drop a tape or snapshot to load it</div>
+            </div>
+            <div class="bezel-foot">
+              <span class="badge" id="badge">ZX Spectrum</span>
+              <span class="stripes" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <i id="power-lamp" class="lamp power-lamp" title="Power"></i>
+            </div>
+          </div>
+
+          <div class="deck" aria-label="Tape deck">
+            <div class="tape" id="tape">
+              <span class="slot-no" aria-hidden="true">▭</span>
+              <button class="cart" type="button" id="tape-load" title="Insert a tape (.tap, .tzx) or load a snapshot (.z80, .sna), also in a .zip">
+                <span class="cart-label" id="tape-label">No tape: click or drop a .tap, .tzx, .z80</span>
+              </button>
+              <span class="tape-pos" id="tape-pos"></span>
+              <div class="tape-keys">
+                <button type="button" id="tape-run" title="Reset and type LOAD &quot;&quot;">▶ LOAD ""</button>
+                <button type="button" id="tape-play" title="Play or stop the tape in real time">⏯</button>
+                <button type="button" id="tape-rewind" title="Rewind">⏮</button>
+                <button type="button" id="tape-save" title="Download the tape (with what SAVE recorded on it) as .tap">⤓</button>
+                <button type="button" id="tape-blank" title="Insert a blank tape to SAVE onto">＋ Blank</button>
+                <button type="button" class="eject" id="tape-eject" title="Eject">⏏</button>
+              </div>
+              <p class="note tape-note" id="tape-note"></p>
+            </div>
+            <input id="tape-file" type="file" accept=".tap,.tzx,.z80,.sna,.zip" hidden />
+          </div>
+
+          <div class="kbd-wrap">
+            <button id="kbd-toggle" class="key-btn kbd-toggle" type="button" aria-expanded="false">⌨ Keyboard</button>
+            <div class="kbd" id="kbd" hidden aria-label="Spectrum keyboard"></div>
+          </div>
+
+          <div class="shelf" aria-label="Tape shelf">
+            <h2>Shelf</h2>
+            <ul id="shelf-list"></ul>
+            <p class="note" id="shelf-empty">Every tape and snapshot you load waits here. Click one to load it again.</p>
+          </div>
+        </section>
+
+        <!-- Right: display, sound, controls -->
+        <aside class="panel" aria-label="Settings">
+          <h2>Display</h2>
+          <label class="check"><input type="checkbox" id="smooth" /> Smooth pixels</label>
+          <label class="check"><input type="checkbox" id="scanlines" /> Scanlines</label>
+          <label class="check"><input type="checkbox" id="curve" /> Curved glass</label>
+          <label class="check"><input type="checkbox" id="flicker" /> Flicker</label>
+          <label class="check"><input type="checkbox" id="humbar" /> Hum bar</label>
+          <button id="fullscreen" class="key-btn" type="button">⛶ Full screen</button>
+
+          <h2>Sound</h2>
+          <label class="field">Volume
+            <input id="volume" type="range" min="0" max="100" value="70" />
+          </label>
+
+          <h2>Controls</h2>
+          <label class="field">Joystick
+            <select id="joystick">
+              <option value="kempston">Kempston</option>
+              <option value="sinclair">Sinclair (6–0)</option>
+              <option value="cursor">Cursor / Protek (5–8, 0)</option>
+              <option value="none">None (arrows are the cursor keys)</option>
+            </select>
+          </label>
+          <p class="note">With a joystick on, the arrow keys and Right Alt (fire) are the stick. The keyboard types by character: <kbd>"</kbd> is SYMBOL SHIFT + P.</p>
+          <dl class="keys">
+            <dt>Shift</dt><dd>CAPS SHIFT</dd>
+            <dt>Ctrl</dt><dd>SYMBOL SHIFT</dd>
+            <dt>Tab</dt><dd>Extended mode (E)</dd>
+            <dt>Bksp</dt><dd>DELETE</dd>
+            <dt>Esc</dt><dd>BREAK</dd>
+            <dt>Caps</dt><dd>CAPS LOCK</dd>
+          </dl>
+          <p class="note">In K mode each letter key is a keyword: P is PRINT, J is LOAD. Open the keyboard below the tape deck to see them.</p>
+          <p class="note" id="gamepad">No gamepad. Plug one in and press a button.</p>
+        </aside>
+      </main>
+
+      <footer class="foot">
+        K-Prompt · © 2026 Eduardo Stern · <a href="./history.html">The Spectrum story</a> ·
+        siblings: <a href="https://a-prompt.stern.workers.dev">A-Prompt</a> (CP/M) and
+        <a href="https://ok-prompt.stern.workers.dev">Ok-Prompt</a> (MSX), whose Z80 core it shares ·
+        Spectrum ROM © Amstrad, distributed with their permission for emulators ·
+        TK90X and TK95 ROMs © Microdigital
+      </footer>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
