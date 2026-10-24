@@ -417,7 +417,8 @@
           <div class="chip-card"><b>The keyboard</b><span>Reading port FEh, the high address byte picks half-rows of keys, and several half-rows AND together, so games that scan the whole keyboard at once work.</span></div>
           <div class="chip-card"><b>The beeper</b><span>EAR and MIC changes are noted with their T-state. Each sound sample is the average level over its slice of the frame, which keeps the square waves clean.</span></div>
           <div class="chip-card"><b>The tape</b><span>Standard blocks are copied in at once by catching the ROM's LD-BYTES. Others play in real time as pulses on the EAR bit: the ROM, or a turbo loader, decodes them itself and the border stripes.</span></div>
-          <div class="chip-card"><b>Not yet</b><span>Contention (the 6,5,4,3,2,1,0,0 delays) and the floating bus are not emulated yet. Most software does not notice; multicolour engines and some loaders do.</span></div>
+          <div class="chip-card"><b>Contention</b><span>While the ULA reads the display, 128 T-states of every line, it holds the CPU off 4000h–7FFFh. An access there waits for its free slot, 6, 5, 4, 3, 2, 1, 0 or 0 T-states depending on where in the ULA's 8-T-state cycle it falls; the ULA's own ports wait too. K-Prompt's Z80 times every memory and I/O cycle on its own, so each one waits exactly as long as on a real 48K (checked against FUSE's tests, cycle by cycle). The TK uses the same pattern from its own first pixel, as ESPectrum does.</span></div>
+          <div class="chip-card"><b>The floating bus</b><span>Reading a port nothing answers returns whatever is on the data bus: during the display, the bitmap or attribute byte the ULA is fetching at that T-state; elsewhere FFh. Games such as Arkanoid and Sidewize sync to the beam this way. Port 1Fh floats too when no Kempston interface is plugged in.</span></div>
         </div>
       </section>
 

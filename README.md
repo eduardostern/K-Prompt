@@ -11,7 +11,10 @@ The name comes from the flashing **K** cursor the Spectrum waits at, as
 [A-Prompt](https://a-prompt.stern.workers.dev), its CP/M sibling, is named
 after `A>` and [Ok-Prompt](https://ok-prompt.stern.workers.dev), its MSX
 sibling, after `Ok`. The Z80 core comes from A-Prompt, where zexdoc and
-zexall pass.
+zexall pass; here it times every memory and I/O cycle on its own, so the
+ULA's contention delays the CPU exactly as on a real 48K (FUSE's core
+tests pass, every bus event at its T-state), and unattached ports read the
+floating bus.
 
 ## What it does
 

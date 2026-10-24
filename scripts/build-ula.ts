@@ -11,11 +11,15 @@
  *
  * Timing (48K): the frame starts with the interrupt; pixel line y is shown
  * from T = 14336 + 224·y. The band is lines 64-127, columns 10-21. Line
- * k's colours are written from 160 T-states into the line before it: the
+ * k's colours are written from 128 T-states into the line before it: the
  * beam has passed the band's columns (they end at +88) and is in the
- * border, and the writes end before it reaches column 10 of line k (+264).
- * Every block keeps to code and tables above 8000h, so no access is
- * delayed by the ULA and the count is the same as on a real 48K.
+ * border, and the writes end at +212, before it reaches column 10 of line
+ * k (+264). The window matters on a real 48K: from 1 T-state before a
+ * line's first pixel (+223 of the line before), for 128 T-states, the ULA
+ * holds the CPU off 4000h-7FFFh, and an attribute write there would wait
+ * and push the rest of the frame late. From +127 to +222 nothing waits.
+ * The code and tables sit above 8000h, so only those writes touch
+ * contended memory.
  */
 import { readFileSync } from 'node:fs';
 import { assemble } from './z80asm';
@@ -29,7 +33,7 @@ const BAND_TOP = 64; // pixel line
 const BAND_LINES = 64;
 const BAND_COL = 10;
 const BAND_COLS = 12;
-const WRITE_AT = 160; // T-states into the previous line
+const WRITE_AT = 128; // T-states into the previous line: the first one the ULA leaves free
 
 /**
  * From the interrupt to `sync`: the interrupt is taken 0-3 T-states into

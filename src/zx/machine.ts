@@ -26,7 +26,7 @@ import { Beeper } from './beeper';
 import { KEYS, Key, keysFor, Matrix, SS } from './keyboard';
 import { Modem } from './modem';
 import { checksum, Tape } from './tape';
-import { Timing, Ula } from './ula';
+import { contentionTable, Timing, Ula } from './ula';
 import { CF } from '../z80';
 
 export const CPU_CLOCK = 3_500_000;
@@ -36,7 +36,7 @@ export const MODEM_STATUS = 0x01bf;
 export const MODEM_DATA = 0x02bf;
 
 /** Sinclair's ULA (Ferranti): 224 T × 312 lines at 3.5 MHz, 50.08 Hz. */
-export const TIMING_48K: Timing = { clock: CPU_CLOCK, lineT: 224, frameT: 69_888, displayStart: 14_336 };
+export const TIMING_48K: Timing = { clock: CPU_CLOCK, lineT: 224, frameT: 69_888, displayStart: 14_336, intLength: 32, busPhase: 2 };
 
 /**
  * Microdigital's own ULA in the TK90X and TK95: a 14.318 MHz crystal (four
@@ -44,11 +44,13 @@ export const TIMING_48K: Timing = { clock: CPU_CLOCK, lineT: 224, frameT: 69_888
  * is 228 T. Brazil's PAL-M television is 60 Hz: 262 lines, 59.86 Hz. Pin 1
  * of the ULA selects 50 Hz, 312 lines, a common owner's modification.
  * Measured on a real TK90X by the Cantinho do TK90X blog (2012-13); the
- * paper's start after the interrupt is ESPectrum's.
+ * paper's start after the interrupt, the floating bus (one T-state later
+ * in the ULA's fetch cycle than Ferranti's) and the contention (Ferranti's
+ * pattern from the first pixel) are ESPectrum's.
  */
 export const TK_CLOCK = 3_575_611;
-export const TIMING_TK60: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 262, displayStart: 8_760 };
-export const TIMING_TK50: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 312, displayStart: 14_688 };
+export const TIMING_TK60: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 262, displayStart: 8_760, intLength: 32, busPhase: 3 };
+export const TIMING_TK50: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 312, displayStart: 14_688, intLength: 32, busPhase: 3 };
 
 export type Model = '48k' | 'tk90x' | 'tk95';
 
@@ -105,6 +107,8 @@ export class Spectrum {
   frames = 0;
   /** Kempston joystick: bit 0 right, 1 left, 2 down, 3 up, 4 fire. */
   kempston = 0;
+  /** Whether a Kempston interface is plugged in; without it port 1Fh is the floating bus. */
+  kempstonAttached = true;
   /** Port FEh's last output. */
   private lastOut = 0;
   /** Keys being typed: one chord per entry, pressed then released. */
@@ -167,6 +171,9 @@ export class Spectrum {
   private applyTiming(): void {
     const t = timingOf(this.model, this.tkVideo);
     this.ula.timing = t;
+    // The ULA contends 4000h-7FFFh.
+    this.cpu.contention = contentionTable(t);
+    this.cpu.contendedPage.set([0, 1, 0, 0]);
     this.beeper.clock = t.clock;
     if (this.tape) this.tape.scale = t.clock / CPU_CLOCK;
     // Keep the CPU inside the (possibly shorter) frame.
@@ -204,8 +211,23 @@ export class Spectrum {
     }
     if (port === MODEM_STATUS) return this.modem.status();
     if (port === MODEM_DATA) return this.modem.read();
-    if (!(port & 0x20)) return this.kempston & 0x1f;
-    return 0xff;
+    if (!(port & 0x20) && this.kempstonAttached) return this.kempston & 0x1f;
+    return this.ula.floatingBus(this.busReadT(port));
+  }
+
+  /**
+   * When the data bus is sampled: the core calls portIn one T-state into
+   * the I/O cycle; the byte is read two T-states later, after any
+   * contention of a port in 4000h-7FFFh (as FUSE times it).
+   */
+  private busReadT(port: number): number {
+    const c = this.cpu.contention!;
+    let t = this.cpu.cycles;
+    if (this.cpu.contendedPage[port >> 14]) {
+      for (let k = 0; k < 2; k++) t += (c[t] | 0) + 1;
+      return t + (c[t] | 0);
+    }
+    return t + 2;
   }
 
   private portOut(port: number, v: number): void {
@@ -224,9 +246,9 @@ export class Spectrum {
   runFrame(): void {
     this.stepTyping();
     const cpu = this.cpu;
-    const { frameT } = this.ula.timing;
+    const { frameT, intLength } = this.ula.timing;
     while (cpu.cycles < frameT) {
-      if (cpu.cycles < 32) cpu.interrupt(0xff);
+      if (cpu.cycles < intLength) cpu.interrupt(0xff);
       if (this.tape && (cpu.pc === LD_BYTES || cpu.pc === SA_BYTES)) this.tapeTrap();
       cpu.step();
       this.ula.catchUp(cpu.cycles);

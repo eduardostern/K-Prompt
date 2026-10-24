@@ -17,8 +17,9 @@
 ; by scripts/build-ula.ts, which counts the T-states; this file is the rest.
 ;
 ; The code and its tables sit above 8000h, where the ULA never delays the
-; CPU, and the colours are written while the beam is away from the band's
-; columns, so the timing holds on a real 48K. A TK90X at 60 Hz has 228
+; CPU, and the colours are written while the beam is in the right border
+; and the ULA leaves the screen memory free, so the timing holds on a real
+; 48K. A TK90X at 60 Hz has 228
 ; T-state lines and a different frame: the band tears, as it did on one.
 ;
 ; SPACE goes back to BASIC. K-Prompt, MIT licence. Build: npm run tapes

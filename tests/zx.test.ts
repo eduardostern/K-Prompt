@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { KEYS, Model, MODELS, Spectrum, TIMING_48K, TIMING_TK60, TkVideo } from '../src/zx/machine';
-import { BORDER_TOP, BORDER_X, HEIGHT, PALETTE, Ula, WIDTH } from '../src/zx/ula';
+import { BORDER_TOP, BORDER_X, contentionTable, HEIGHT, PALETTE, Ula, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
@@ -389,5 +389,89 @@ describe('the ULA reads each cell as the beam reaches it', () => {
     // The next line of the same cells is all red.
     ula.endFrame();
     expect(ula.frame[row + WIDTH]).toBe(PALETTE[2]);
+  });
+});
+
+/** Runs one instruction placed at 8000h (uncontended) from T-state `t`; returns its length. */
+function timeAt(zx: Spectrum, code: number[], t: number): number {
+  zx.mem.set(code, 0x8000);
+  zx.cpu.pc = 0x8000;
+  zx.cpu.cycles = t;
+  zx.cpu.step();
+  return zx.cpu.cycles - t;
+}
+
+describe('contention', () => {
+  it('delays 4000h-7FFFh by 6,5,4,3,2,1,0,0 while the ULA reads the display', () => {
+    const c = contentionTable(TIMING_48K);
+    expect(Array.from(c.subarray(14_335, 14_343))).toEqual([6, 5, 4, 3, 2, 1, 0, 0]);
+    expect(c[14_334]).toBe(0); // the line's display has not started
+    expect(c[14_335 + 128]).toBe(0); // right border
+    expect(c[14_335 + 224]).toBe(6); // the next line
+    expect(c[14_335 + 191 * 224]).toBe(6); // the last display line
+    expect(c[14_335 + 192 * 224]).toBe(0); // bottom border
+  });
+
+  it('makes LD A,(4000h) wait when its read lands in a busy slot, and only then', () => {
+    const zx = boot();
+    // LD A,(nn) is 13 T-states: fetch 4, nn 3+3, then the read at +10.
+    expect(timeAt(zx, [0x3a, 0x00, 0x40], 14_325)).toBe(13 + 6); // read at 14,335
+    expect(timeAt(zx, [0x3a, 0x00, 0x40], 14_329)).toBe(13 + 2); // read at 14,339
+    expect(timeAt(zx, [0x3a, 0x00, 0x40], 14_331)).toBe(13); // read at 14,341: the free slot
+    expect(timeAt(zx, [0x3a, 0x00, 0x80], 14_325)).toBe(13); // 8000h is never contended
+    expect(timeAt(zx, [0x3a, 0x00, 0x40], 1_000)).toBe(13); // top border
+  });
+
+  it('contends the ULA\'s port wherever it is, and other ports only in 4000h-7FFFh', () => {
+    const zx = boot();
+    // OUT (n),A is 11 T-states; the I/O cycle starts at +7.
+    zx.cpu.a = 0x07; // port 07FEh: the ULA, high byte not in 40h-7Fh
+    expect(timeAt(zx, [0xd3, 0xfe], 14_335 - 8)).toBe(11 + 6); // its contended T-state is +8
+    zx.cpu.a = 0x07; // port 07FFh: not the ULA, not in 4000h-7FFFh
+    expect(timeAt(zx, [0xd3, 0xff], 14_335 - 8)).toBe(11);
+    zx.cpu.a = 0x40; // port 40FFh: contended at every T-state of the cycle
+    expect(timeAt(zx, [0xd3, 0xff], 14_335 - 7)).toBeGreaterThan(11 + 6);
+  });
+
+  it('follows the TK\'s own frame', () => {
+    const c = contentionTable(TIMING_TK60);
+    expect(Array.from(c.subarray(8_759, 8_767))).toEqual([6, 5, 4, 3, 2, 1, 0, 0]);
+    expect(c[8_759 + 228]).toBe(6);
+    expect(c[8_759 + 224]).toBe(0);
+  });
+});
+
+describe('floating bus', () => {
+  it('reads the byte the ULA is fetching, and FFh when it fetches nothing', () => {
+    const mem = new Uint8Array(0x10000);
+    const ula = new Ula(mem, TIMING_48K);
+    mem[0x4000] = 0x11; mem[0x4001] = 0x22; mem[0x5800] = 0x33; mem[0x5801] = 0x44;
+    mem[0x4100] = 0x55; // pixel line 1, column 0
+    // As FUSE: bitmap 0 at 14,338, its attribute, bitmap 1, its attribute, then idle.
+    expect([14_337, 14_338, 14_339, 14_340, 14_341, 14_342].map((t) => ula.floatingBus(t)))
+      .toEqual([0xff, 0x11, 0x33, 0x22, 0x44, 0xff]);
+    expect(ula.floatingBus(14_338 + 224)).toBe(0x55);
+    expect(ula.floatingBus(14_338 + 128)).toBe(0xff); // right border
+    expect(ula.floatingBus(5_000)).toBe(0xff); // top border
+  });
+
+  it('answers IN from an unattached port, and port 1Fh with no Kempston', () => {
+    const zx = boot();
+    zx.mem.fill(0x5a, 0x5800, 0x5b00);
+    zx.mem.fill(0x00, 0x4000, 0x5800);
+    // IN A,(FFh): the core asks at +8; the bus is sampled two T-states later.
+    zx.cpu.a = 0;
+    timeAt(zx, [0xdb, 0xff], 14_339 - 10);
+    expect(zx.cpu.a).toBe(0x5a);
+    zx.cpu.a = 0;
+    timeAt(zx, [0xdb, 0xff], 14_342 - 10);
+    expect(zx.cpu.a).toBe(0xff);
+    zx.kempston = 0;
+    zx.cpu.a = 0;
+    timeAt(zx, [0xdb, 0x1f], 14_339 - 10);
+    expect(zx.cpu.a).toBe(0); // Kempston, nothing pressed
+    zx.kempstonAttached = false;
+    timeAt(zx, [0xdb, 0x1f], 14_339 - 10);
+    expect(zx.cpu.a).toBe(0x5a);
   });
 });

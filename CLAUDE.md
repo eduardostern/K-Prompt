@@ -2,8 +2,9 @@
 
 ZX Spectrum 48K emulator for the browser in TypeScript, with Microdigital's
 Brazilian clones (TK90X, TK95). Static site (Vite). Sibling of A-Prompt
-(`~/cpm`, CP/M) and Ok-Prompt (`~/Ok-Prompt`, MSX); the Z80 core is
-Ok-Prompt's copy of A-Prompt's. Named after the flashing K cursor.
+(`~/cpm`, CP/M) and Ok-Prompt (`~/Ok-Prompt`, MSX); the Z80 core started
+as Ok-Prompt's copy of A-Prompt's and is now timed access by access (only
+here). Named after the flashing K cursor.
 
 ## Commands
 
@@ -13,11 +14,12 @@ npm test                         # vitest (zex tests skipped)
 npx tsc --noEmit                 # typecheck (npm run build also runs it)
 npm run build                    # static site in dist/
 npm run deploy                   # build + wrangler deploy (only when the user says so)
-ZEX=1 npx vitest run tests/zex.test.ts   # zexdoc + zexall, ~2.5 min
+ZEX=1 npx vitest run tests/zex.test.ts   # zexdoc + zexall, ~4 min
 ```
 
 Run `npx tsc --noEmit` and `npm test` before every commit. Rerun the zex
-exerciser after any change to `src/z80.ts`.
+exerciser after any change to `src/z80.ts`; `tests/fuse.test.ts` (FUSE's
+core tests, every bus event with its T-state) runs in `npm test`.
 
 ## Workflow
 
@@ -29,9 +31,9 @@ exerciser after any change to `src/z80.ts`.
 
 | Path | Role |
 | --- | --- |
-| `src/z80.ts` | Z80 core; memory through `read`/`write`, ports get the full 16-bit address |
+| `src/z80.ts` | Z80 core: every M-cycle advances `cycles` when it happens (`mc`, `ioPre`/`ioPost`); memory through `read`/`write`, ports get the full 16-bit address; MEMPTR and Q |
 | `src/zx/machine.ts` | `Spectrum`: memory, ports, `runFrame()`, models, tape traps, typing queue, `screenText()` |
-| `src/zx/ula.ts` | Picture drawn cell by cell (8 pixels, 4 T) as the beam passes; border changes kept with their T-state |
+| `src/zx/ula.ts` | Picture drawn cell by cell (8 pixels, 4 T) as the beam passes; border changes kept with their T-state; `contentionTable`, `floatingBus` |
 | `src/zx/beeper.ts` | EAR/MIC (and the tape while it plays) averaged per output sample |
 | `src/zx/keyboard.ts` | 8×5 matrix, PC keys by character (`"` = SYMBOL SHIFT + P), `KeyInput` |
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |
@@ -58,6 +60,17 @@ exerciser after any change to `src/z80.ts`.
   (48K timing) as on some export boards. `timingOf(model, tkVideo)`. Tape
   pulses are 3.5 MHz T-states, stretched by `Tape.scale` on the TK clock.
   Sources: Cantinho do TK90X's measurements, ESPectrum, the CPLD clone.
+- Contention: `contentionTable(timing)` gives the wait states for every
+  T-state (6,5,4,3,2,1,0,0 for 128 T of each display line, from 1 T before
+  the line's first pixel); the core adds them before each cycle whose
+  address is in a page flagged in `cpu.contendedPage` (4000h–7FFFh). I/O
+  follows FUSE: ULA ports (A0 = 0) are contended once at +1, other ports in
+  4000h–7FFFh at each of their T-states. HALT keeps PC on itself and is
+  refetched every 4 T (the interrupt steps past it), as FUSE does.
+- Floating bus: an unattached port (and 1Fh without a Kempston,
+  `kempstonAttached`) returns `ula.floatingBus(t)`, sampled 2 T after the
+  core calls `portIn` (`busReadT`): bitmap, attribute, bitmap+1, attribute+1,
+  then FFh ×4 in each 8 T of the display, from `busPhase` (48K 2, TK 3).
 - The ULA answers every even port; keyboard half-row r is selected by a 0
   in address bit 8+r, and several rows AND together. Port 1Fh (A5 low) is
   Kempston. The core passes `A<<8|n` for `IN A,(n)` and BC for `IN r,(C)`.
@@ -98,8 +111,10 @@ exerciser after any change to `src/z80.ts`.
 
 - 48K timing only: IM 2 (table at BD00h, handler RET at BEBEh), a counted
   delay, then 64 blocks of exactly 224 T that PUSH 12 attributes per pixel
-  line from 160 T into the previous line. Code and tables stay above 8000h,
-  so the count holds on a real 48K without contention emulation.
+  line from 128 T into the previous line: the attribute writes must fall in
+  T 127–222 of a line, where the ULA does not contend (they used to start at
+  160 and ran into the next line's contended slots). Code and tables stay
+  above 8000h.
 - `tests/ula.test.ts` checks every band line's colours over 30 frames and
   that 600 frames each reach HALT before the next interrupt.
 

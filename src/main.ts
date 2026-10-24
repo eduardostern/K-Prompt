@@ -223,6 +223,8 @@ async function start(): Promise<void> {
   const applyStick = () => {
     const bits = (stick.right ? 1 : 0) | (stick.left ? 2 : 0) | (stick.down ? 4 : 0) | (stick.up ? 8 : 0) | (stick.fire ? 16 : 0) | padBits;
     zx.kempston = settings.joystick === 'kempston' ? bits : 0;
+    // Without the interface, port 1Fh is the floating bus (games use it to detect one).
+    zx.kempstonAttached = settings.joystick === 'kempston';
     const extra: Key[] = [];
     const map = settings.joystick === 'sinclair' ? ['7', '6', '8', '9', '0']
       : settings.joystick === 'cursor' ? ['8', '5', '6', '7', '0'] : null;
@@ -261,6 +263,7 @@ async function start(): Promise<void> {
   const joystick = $<HTMLSelectElement>('joystick');
   joystick.value = settings.joystick;
   joystick.addEventListener('change', () => { settings.joystick = joystick.value as Joystick; save(); applyStick(); });
+  applyStick();
 
   // The on-screen keyboard: a tap types the key; CAPS and SYMBOL SHIFT stay
   // down until the next key, so one finger can type shifted keys.

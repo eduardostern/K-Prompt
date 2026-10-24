@@ -46,6 +46,33 @@ export interface Timing {
   frameT: number;
   /** T-state of the first display pixel (top left of the 256×192). */
   displayStart: number;
+  /** How long the interrupt is held at the start of the frame. */
+  intLength: number;
+  /**
+   * The floating bus: T-states after a display line's start at which the
+   * ULA's first fetch (bitmap byte 0) is on the data bus.
+   */
+  busPhase: number;
+}
+
+/** The ULA's wait states, by T-state within each 8 of a display line's 128 (FUSE's and ESPectrum's). */
+const DELAYS = [6, 5, 4, 3, 2, 1, 0, 0];
+
+/**
+ * Contention: the wait states at every T-state of the frame. While the ULA
+ * reads the display (128 T-states of each of the 192 lines) it holds the
+ * CPU off contended memory, and an access waits for the ULA's free slot:
+ * 6 T-states at the first one, down to none for the last two of each 8.
+ * It starts one T-state before the first pixel: 14,335 on the 48K. A few
+ * spare entries follow the frame for an instruction that runs past its end.
+ */
+export function contentionTable(t: Timing): Uint8Array {
+  const table = new Uint8Array(t.frameT + 64);
+  for (let y = 0; y < 192; y++) {
+    const line = t.displayStart - 1 + y * t.lineT;
+    for (let x = 0; x < 128; x++) table[line + x] = DELAYS[x & 7];
+  }
+  return table;
 }
 
 /** The picture is drawn in 8-pixel cells: 44 per line (48 + 256 + 48 pixels). */
@@ -153,6 +180,24 @@ export class Ula {
       out[o + p] = c;
       out[o + p + 1] = c;
     }
+  }
+
+  /**
+   * The floating bus: what an unattached port reads at T-state `t`. During
+   * the display the ULA is fetching, in each 8 T-states, a bitmap byte, its
+   * attribute, the next bitmap byte and its attribute, then nothing for 4;
+   * that byte is on the data bus. Anywhere else the bus is idle (FFh).
+   */
+  floatingBus(t: number): number {
+    const { displayStart, lineT, busPhase } = this.timing;
+    const k = t - displayStart - busPhase;
+    if (k < 0) return 0xff;
+    const y = (k / lineT) | 0;
+    const x = k - y * lineT;
+    if (y >= 192 || x >= 128 || (x & 7) > 3) return 0xff;
+    const col = (x >> 3) * 2 + ((x >> 1) & 1);
+    if (x & 1) return this.mem[0x5800 + (y >> 3) * 32 + col];
+    return this.mem[(0x4000 | ((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
   }
 
   private drawDisplay(y: number, col: number, o: number): void {
