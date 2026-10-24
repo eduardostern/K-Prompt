@@ -86,9 +86,10 @@ exerciser after any change to `src/z80.ts`.
   ROM decodes in E mode: a letter arrives as its E-mode token (`etab`).
 - `tests/term.test.ts` checks the committed TERM.tap matches its source;
   after editing `programs/TERM.asm`, run `npm run term`.
-- With the speaker on, the call sound holds the line ~11 s before CONNECT
-  (as in A-Prompt), and Synchronet's terminal detection gives up meanwhile
-  (DUMB, 80 columns). ATM0 connects at once and is detected as ANSI 64x24.
+- The call sound plays the whole call (dial tone to handshake) before the
+  connection opens and holds nothing after: Synchronet probes the terminal
+  at once and, answered late, calls it DUMB at 80 columns. Answered in
+  time it reports ANSI 64x24. Same code as A-Prompt and Ok-Prompt.
 - Live checks: Vertrauen (ATDT 1) has its own WebSocket gateway, so it works
   from `vite preview`; the others need `npm run build && npx wrangler dev`.
 
