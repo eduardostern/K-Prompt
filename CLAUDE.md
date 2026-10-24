@@ -36,6 +36,7 @@ exerciser after any change to `src/z80.ts`.
 | `src/zx/keyboard.ts` | 8×5 matrix, PC keys by character (`"` = SYMBOL SHIFT + P), `KeyInput` |
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |
 | `src/zx/tape.ts` | `.tap`/`.tzx` blocks: bytes for the LD-BYTES trap, pulses for real-time play |
+| `src/zx/basic.ts` | Listing → tokens (+ 0Eh and the 5-byte number after each number) → a .tap with autostart |
 | `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3, 48K) load and save |
 | `src/main.ts` | Page wiring, frame loop, deck, shelf, keyboard, joystick, gamepad |
 | `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt); call sound (from A-Prompt) |

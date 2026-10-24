@@ -5,6 +5,7 @@ import { HEIGHT, PALETTE, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
+import { fiveBytes, programTape, tokenize } from '../src/zx/basic';
 
 const rom = (name: string) => new Uint8Array(readFileSync(new URL(`../src/roms/${name}.rom`, import.meta.url)));
 
@@ -228,5 +229,47 @@ describe('snapshots', () => {
     loadSnapshot(other, 'v1.z80', file);
     expect(Array.from(other.mem.subarray(0x4000))).toEqual(Array.from(ram));
     expect(other.cpu.pc).toBe(zx.cpu.pc);
+  });
+});
+
+describe('pasted BASIC', () => {
+  it('writes numbers in the ROM 5-byte form', () => {
+    expect(fiveBytes(10)).toEqual([0, 0, 10, 0, 0]);
+    expect(fiveBytes(-1)).toEqual([0, 0xff, 0xff, 0xff, 0]);
+    expect(fiveBytes(0.5)).toEqual([0x80, 0, 0, 0, 0]);
+    expect(fiveBytes(1e6)).toEqual([0x94, 0x74, 0x24, 0, 0]);
+    expect(fiveBytes(-2.5)).toEqual([0x82, 0xa0, 0, 0, 0]);
+  });
+
+  it('tokenizes a listing that the ROM runs and LISTs back', () => {
+    const listing = [
+      '10 REM K-Prompt test: GOTO stays text',
+      '20 LET total=0',
+      '30 FOR i=1 TO 10: LET total=total+i: NEXT i',
+      '40 IF total>=55 THEN PRINT "sum ";total;" ok"',
+      '50 PRINT 3.5*2, BIN 101, INT PI',
+      '60 GOTO 80',
+      '70 PRINT "skipped"',
+      '80 PRINT CHR$ 65+STR$ 7',
+    ].join('\n');
+    const zx = boot();
+    // Saved with an autostart line: LOAD "" runs it.
+    zx.tape = parseTap('basic.tap', programTape('test', tokenize(listing), 10));
+    zx.pressKeys([KEYS.J], [KEYS.SS, KEYS.P], [KEYS.SS, KEYS.P]);
+    zx.typeText('\n');
+    settle(zx, 60);
+    // Under the "Program: test" the ROM printed while loading.
+    const out = zx.screenText();
+    expect(out.slice(1, 6)).toEqual(['Program: test', 'sum 55 ok', '7               5', '3', 'A7']);
+    expect(screen(zx)).toContain('0 OK, 80:1');
+    // LIST shows the lines as typed, the keywords spaced by the ROM.
+    zx.pressKeys([KEYS.K]);
+    zx.typeText('\n');
+    settle(zx, 30);
+    const list = zx.screenText();
+    expect(list).toContain('  10 REM K-Prompt test: GOTO sta');
+    expect(list).toContain('  30 FOR i=1 TO 10: LET total=to');
+    expect(list).toContain('  50 PRINT 3.5*2,BIN 101,INT PI');
+    expect(list).toContain('  60 GO TO 80');
   });
 });

@@ -17,6 +17,7 @@ import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { layoutFor } from './zx/legend';
 import { CPU_CLOCK, Model, MODELS, Spectrum } from './zx/machine';
 import { isSnapshot, loadSnapshot, saveZ80 } from './zx/snapshot';
+import { programTape, tokenize } from './zx/basic';
 import { blankTape, parseTape, Tape } from './zx/tape';
 import { HEIGHT, WIDTH } from './zx/ula';
 import { audioContext } from './ui/audio';
@@ -452,6 +453,28 @@ async function start(): Promise<void> {
   });
   $('snap-save').addEventListener('click', () => {
     if (running) download(`k-prompt-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.z80`, saveZ80(zx));
+  });
+
+  // Paste a listing: tokenized onto a tape, loaded and run.
+  const pasteDialog = $<HTMLDialogElement>('paste-dialog');
+  const pasteText = $<HTMLTextAreaElement>('paste-text');
+  const pasteError = $('paste-error');
+  $('paste-open').addEventListener('click', () => {
+    pasteError.textContent = '';
+    pasteDialog.showModal();
+    pasteText.focus();
+  });
+  $('paste-run').addEventListener('click', (e) => {
+    try {
+      const program = tokenize(pasteText.value);
+      // Autostart at the first line, as a tape saved with SAVE "name" LINE n.
+      const tap = programTape('listing', program, (program[0] << 8) | program[1]);
+      insertTape({ name: 'listing.tap', data: tap });
+      typeLoad();
+    } catch (err) {
+      e.preventDefault();
+      pasteError.textContent = (err as Error).message;
+    }
   });
 
   // Drag and drop anywhere on the page.

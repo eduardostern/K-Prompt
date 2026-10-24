@@ -41,6 +41,7 @@
           <label class="check"><input type="checkbox" id="turbo-tape" /> Fast-forward while a tape plays</label>
           <div class="btn-row">
             <button id="snap-save" class="key-btn" type="button" title="Save the whole machine as a .z80 snapshot">⤓ Snapshot</button>
+            <button id="paste-open" class="key-btn" type="button" title="Paste a BASIC listing and load it as a program">✎ Listing</button>
           </div>
           <dl class="readout">
             <dt>Frames</dt><dd id="fps">–</dd>
@@ -155,6 +156,19 @@
         TERM's font: Tom Thumb © 1999 Brian J. Swetland, Vassilii Khachaturov, Robey Pointer (BSD licence)
       </footer>
     </div>
+    <dialog class="paste-dialog" id="paste-dialog">
+      <form method="dialog">
+        <h2>Type in a listing</h2>
+        <p>Paste a BASIC program, one numbered line per line, as a magazine printed it.
+          Keywords become the Spectrum's tokens (GOTO and GO TO both work); it goes onto a tape and loads with LOAD "".</p>
+        <textarea id="paste-text" rows="12" spellcheck="false" placeholder="10 FOR i=0 TO 7&#10;20 BORDER i: BEEP .1,i*2&#10;30 NEXT i"></textarea>
+        <p class="paste-error" id="paste-error"></p>
+        <div class="confirm-actions">
+          <button value="no" type="submit">Cancel</button>
+          <button value="run" class="confirm-ok" id="paste-run" type="submit">Load and RUN</button>
+        </div>
+      </form>
+    </dialog>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

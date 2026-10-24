@@ -538,3 +538,14 @@ body {
   .kbd-key .main b { font-size: 13px; }
 }
 kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+
+/* ---- paste a listing ------------------------------------------------------ */
+
+.paste-dialog { width: min(640px, calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--text); }
+.paste-dialog::backdrop { background: rgba(5, 6, 10, 0.7); backdrop-filter: blur(3px); }
+.paste-dialog form { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: #161822; }
+.paste-dialog h2 { margin: 0; font: 600 15px var(--mono); color: var(--accent); }
+.paste-dialog p { margin: 10px 0; font-size: 13px; color: var(--muted); }
+.paste-dialog textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #0f1015; color: var(--text); font: 13px var(--mono); resize: vertical; }
+.paste-error { color: var(--red) !important; }
+.paste-error:empty { display: none; }

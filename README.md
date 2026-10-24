@@ -20,6 +20,9 @@ zexall pass.
   loading off, play in real time through the EAR input, with the stripes
   in the border, and fast-forward while they play. SAVE records onto the
   tape in the deck, which you can download as a `.tap`.
+- **Listings**: paste a BASIC program as a magazine printed it; it is
+  tokenized (numbers get their hidden 5-byte values), put on a tape with an
+  autostart line, and loaded by the ROM's own LOAD.
 - **Snapshots**: `.z80` (versions 1 to 3, 48K) and `.sna`; save the running
   machine as a `.z80`.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),
