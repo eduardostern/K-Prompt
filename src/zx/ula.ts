@@ -48,6 +48,9 @@ export interface Timing {
   displayStart: number;
 }
 
+/** The picture is drawn in 8-pixel cells: 44 per line (48 + 256 + 48 pixels). */
+const CELLS = WIDTH / 8;
+
 export class Ula {
   /** The picture, WIDTH × HEIGHT. */
   readonly frame = new Uint32Array(WIDTH * HEIGHT);
@@ -55,24 +58,41 @@ export class Ula {
   /** Border changes this frame: T-states and colours, in order. */
   private changeT: number[] = [];
   private changeC: number[] = [];
-  /** The next picture line to draw (0 = the top of the border). */
-  private line = 0;
+  /** The next cell to draw: line × CELLS + cell, from the top left of the border. */
+  private next = 0;
+  /** T-state by which that cell is complete. */
+  private nextT = 0;
+  /** Where the border colour lookup has got to this frame. */
+  private change = 0;
+  private colour = 7;
+  /** The border colour at the start of this frame. */
+  private startColour = 7;
   /** FLASH phase: swaps every 16 frames. */
   private flashCount = 0;
   flashOn = false;
 
-  constructor(private readonly mem: Uint8Array, public timing: Timing) {}
+  constructor(private readonly mem: Uint8Array, public timing: Timing) {
+    this.nextT = this.cellEnd(0);
+  }
 
-  /** T-state at which picture line `row` (0 = top of the visible border) is complete. */
-  private lineEnd(row: number): number {
-    const y = row - BORDER_TOP;
-    return this.timing.displayStart + y * this.timing.lineT + (256 + BORDER_X) / 2;
+  /**
+   * T-state at which cell `n` has been shown: pixel x of line y is shown at
+   * displayStart + y·lineT + x/2, so an 8-pixel cell takes 4 T-states. The
+   * display's cells are read from memory then, as the ULA reads each cell
+   * as the beam reaches it: a program that changes the screen mid-line
+   * (multicolour, border effects) is seen exactly where it acts.
+   */
+  private cellEnd(n: number): number {
+    const y = ((n / CELLS) | 0) - BORDER_TOP;
+    const x = (n % CELLS) * 8 - BORDER_X;
+    return this.timing.displayStart + y * this.timing.lineT + ((x + 8) >> 1);
   }
 
   /** Sets the border at once, for the whole frame (reset, snapshots). */
   setBorderNow(colour: number): void {
-    this.border = this.startColour = colour & 7;
+    this.border = this.startColour = this.colour = colour & 7;
     this.changeT.length = this.changeC.length = 0;
+    this.change = 0;
   }
 
   setBorder(t: number, colour: number): void {
@@ -83,68 +103,67 @@ export class Ula {
     this.changeC.push(colour);
   }
 
-  /** Draws every line that is complete by T-state `t`. */
+  /** Draws every cell that has been shown by T-state `t`. */
   catchUp(t: number): void {
-    while (this.line < HEIGHT && t >= this.lineEnd(this.line)) this.drawLine(this.line++);
+    if (t < this.nextT) return;
+    const total = CELLS * HEIGHT;
+    while (this.next < total && t >= this.nextT) {
+      this.drawCell(this.next++);
+      this.nextT = this.cellEnd(this.next);
+    }
+    if (this.next >= total) this.nextT = Infinity;
   }
 
   /** Finishes the picture and starts the next frame. */
   endFrame(): void {
     this.catchUp(Infinity);
-    this.line = 0;
+    this.next = 0;
+    this.nextT = this.cellEnd(0);
     // The colour in effect carries into the next frame, from its start.
     this.changeT.length = 0;
     this.changeC.length = 0;
-    this.startColour = this.border;
+    this.change = 0;
+    this.startColour = this.colour = this.border;
     if (++this.flashCount >= 16) {
       this.flashCount = 0;
       this.flashOn = !this.flashOn;
     }
   }
 
-  /** The border colour at the start of this frame. */
-  private startColour = 7;
-  /** Index into the change list for the line being drawn. */
-  private colourAt(t: number, from: { i: number; c: number }): number {
-    while (from.i < this.changeT.length && this.changeT[from.i] <= t) from.c = this.changeC[from.i++];
-    return from.c;
+  /** The border colour at T-state `t`; times only move forward through a frame. */
+  private colourAt(t: number): number {
+    while (this.change < this.changeT.length && this.changeT[this.change] <= t) this.colour = this.changeC[this.change++];
+    return this.colour;
   }
 
-  private drawLine(row: number): void {
-    const { displayStart, lineT } = this.timing;
+  private drawCell(n: number): void {
+    const row = (n / CELLS) | 0;
+    const cell = n % CELLS;
     const y = row - BORDER_TOP;
+    const x = cell * 8 - BORDER_X;
+    const o = row * WIDTH + cell * 8;
+    if (y >= 0 && y < 192 && x >= 0 && x < 256) {
+      this.drawDisplay(y, x >> 3, o);
+      return;
+    }
+    const t0 = this.timing.displayStart + y * this.timing.lineT + (x >> 1);
     const out = this.frame;
-    let o = row * WIDTH;
-    const t0 = displayStart + y * lineT;
-    // Find the colour in effect at the start of this line.
-    const cursor = { i: 0, c: this.startColour };
-    const inDisplay = y >= 0 && y < 192;
-    for (let x = -BORDER_X; x < 256 + BORDER_X; x += 2) {
-      if (inDisplay && x === 0) {
-        this.drawDisplay(y, o);
-        o += 256;
-        x = 254;
-        continue;
-      }
-      const c = PALETTE[this.colourAt(t0 + (x >> 1), cursor)];
-      out[o++] = c;
-      out[o++] = c;
+    for (let p = 0; p < 8; p += 2) {
+      const c = PALETTE[this.colourAt(t0 + (p >> 1))];
+      out[o + p] = c;
+      out[o + p + 1] = c;
     }
   }
 
-  private drawDisplay(y: number, o: number): void {
+  private drawDisplay(y: number, col: number, o: number): void {
     const mem = this.mem;
     const out = this.frame;
-    const bitmap = 0x4000 | ((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2);
-    const attrs = 0x5800 + (y >> 3) * 32;
-    for (let col = 0; col < 32; col++) {
-      const attr = mem[attrs + col];
-      let bits = mem[bitmap + col];
-      if (attr & 0x80 && this.flashOn) bits ^= 0xff;
-      const bright = attr & 0x40 ? 8 : 0;
-      const ink = PALETTE[(attr & 7) | bright];
-      const paper = PALETTE[((attr >> 3) & 7) | bright];
-      for (let b = 0x80; b; b >>= 1) out[o++] = bits & b ? ink : paper;
-    }
+    const attr = mem[0x5800 + (y >> 3) * 32 + col];
+    let bits = mem[(0x4000 | ((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
+    if (attr & 0x80 && this.flashOn) bits ^= 0xff;
+    const bright = attr & 0x40 ? 8 : 0;
+    const ink = PALETTE[(attr & 7) | bright];
+    const paper = PALETTE[((attr >> 3) & 7) | bright];
+    for (let b = 0x80; b; b >>= 1) out[o++] = bits & b ? ink : paper;
   }
 }

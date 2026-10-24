@@ -31,7 +31,7 @@ exerciser after any change to `src/z80.ts`.
 | --- | --- |
 | `src/z80.ts` | Z80 core; memory through `read`/`write`, ports get the full 16-bit address |
 | `src/zx/machine.ts` | `Spectrum`: memory, ports, `runFrame()`, models, tape traps, typing queue, `screenText()` |
-| `src/zx/ula.ts` | Picture drawn line by line as T-states pass; border changes kept with their T-state |
+| `src/zx/ula.ts` | Picture drawn cell by cell (8 pixels, 4 T) as the beam passes; border changes kept with their T-state |
 | `src/zx/beeper.ts` | EAR/MIC (and the tape while it plays) averaged per output sample |
 | `src/zx/keyboard.ts` | 8×5 matrix, PC keys by character (`"` = SYMBOL SHIFT + P), `KeyInput` |
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { KEYS, Model, MODELS, Spectrum, TIMING_TK60, TkVideo } from '../src/zx/machine';
-import { HEIGHT, PALETTE, WIDTH } from '../src/zx/ula';
+import { KEYS, Model, MODELS, Spectrum, TIMING_48K, TIMING_TK60, TkVideo } from '../src/zx/machine';
+import { BORDER_TOP, BORDER_X, HEIGHT, PALETTE, Ula, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
@@ -369,5 +369,25 @@ describe('TK timing', () => {
     tk.typeText('\n');
     settle(tk);
     expect(tk.screenText()).toContain('7');
+  });
+});
+
+describe('the ULA reads each cell as the beam reaches it', () => {
+  it('shows an attribute change mid-line from that cell on', () => {
+    const mem = new Uint8Array(0x10000);
+    const ula = new Ula(mem, TIMING_48K);
+    mem.fill(0x38, 0x5800, 0x5b00); // white paper everywhere
+    const line = 40; // pixel line 40: attribute row 5
+    const start = TIMING_48K.displayStart + line * TIMING_48K.lineT;
+    // The beam is half-way along the line: cells 0-15 have been read.
+    ula.catchUp(start + 64);
+    mem.fill(0x10, 0x5800 + 5 * 32, 0x5800 + 6 * 32); // red paper for the whole row
+    ula.catchUp(start + 224);
+    const row = (BORDER_TOP + line) * WIDTH + BORDER_X;
+    expect(ula.frame[row + 8 * 15]).toBe(PALETTE[7]); // read before the change
+    expect(ula.frame[row + 8 * 16]).toBe(PALETTE[2]); // read after it
+    // The next line of the same cells is all red.
+    ula.endFrame();
+    expect(ula.frame[row + WIDTH]).toBe(PALETTE[2]);
   });
 });
