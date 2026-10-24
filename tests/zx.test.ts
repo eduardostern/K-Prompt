@@ -274,6 +274,45 @@ describe('pasted BASIC', () => {
   });
 });
 
+describe('TK90X ROM extras', () => {
+  /** The 21 UDGs as 8-byte glyphs. */
+  const udgs = (zx: Spectrum) => {
+    const at = zx.mem[0x5c7b] | (zx.mem[0x5c7c] << 8);
+    return Array.from({ length: 21 }, (_, i) => Array.from(zx.mem.subarray(at + i * 8, at + i * 8 + 8)));
+  };
+  const glyph = (zx: Spectrum, ch: string) => Array.from(zx.mem.subarray(0x3d00 + (ch.charCodeAt(0) - 32) * 8, 0x3d00 + (ch.charCodeAt(0) - 31) * 8));
+
+  it('SYMBOL SHIFT + X is UDG, which loads accented letters; UDG 2 is an editor', () => {
+    const zx = boot('tk90x', 200);
+    // At power-on the UDGs are copies of A-U, as on the 48K.
+    expect(udgs(zx)[0]).toEqual(glyph(zx, 'A'));
+    zx.pressKeys([KEYS.SS, KEYS.X]);
+    zx.typeText('\n');
+    settle(zx, 30);
+    const pt = udgs(zx);
+    // Á: an acute accent over the A's body, which moved down two lines.
+    expect(pt[0].slice(0, 2)).toEqual([0x08, 0x10]);
+    expect(pt[0].slice(2, 7)).toEqual(glyph(zx, 'A').slice(1, 6));
+    // Ç and ç at T and U: a cedilla below.
+    expect(pt[19][7]).toBe(0x10);
+    expect(pt[20][7]).toBe(0x10);
+
+    zx.pressKeys([KEYS.SS, KEYS.X]);
+    zx.typeText('2\n');
+    settle(zx, 30);
+    // The editor shows the letter and its UDG, now Á (not in the ROM font).
+    expect(zx.screenText().some((l) => l.startsWith('A='))).toBe(true);
+    expect(zx.screenText()).toContain('ABCDEFGHIJKLMNOPQRSTU');
+  });
+
+  it('carries the messages in Portuguese and, in the spare space, in Spanish', () => {
+    const text = String.fromCharCode(...rom('tk90x').map((b) => b & 0x7f));
+    expect(text).toContain('Ligue o gravador, digite ENTER');
+    expect(text).toContain('Conecte grabador, digite ENTER');
+    expect(text).toContain('Variable inexist');
+  });
+});
+
 describe('TK timing', () => {
   /** Edges per second in the sound of BEEP 1,0 (middle C on the ROM's own delay loop). */
   function beepRate(model: Model, video?: TkVideo): number {

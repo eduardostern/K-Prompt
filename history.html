@@ -3,10 +3,457 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The Spectrum story · K-Prompt</title>
+    <meta name="color-scheme" content="dark" />
+    <title>The Spectrum Story · K-Prompt</title>
+    <meta name="description" content="A short history of the ZX Spectrum: Clive Sinclair, a computer built to cost £125, Ferranti's ULA, colour clash, the fans, and Microdigital's Brazilian clones, the TK90X and TK95, with what their ROMs and ULA changed." />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   </head>
-  <body>
-    <p>Coming soon.</p>
+  <body class="history">
+    <div class="doc">
+      <nav class="doc-nav">
+        <a href="./" class="brand-sm"><span class="k">K</span>-Prompt</a>
+        <a href="./" class="doc-back">← Back to the Spectrum</a>
+      </nav>
+
+      <header class="doc-head">
+        <span class="kicker">A field guide · Cambridge to São Paulo</span>
+        <h1>The Spectrum story</h1>
+        <p class="lede">
+          A computer built to a price by a man who cared more about electric
+          cars, sold in its millions, coloured in 8×8 squares, and copied
+          chip for chip in Brazil. It is the machine K-Prompt emulates, along
+          with Microdigital's TK90X and TK95.
+        </p>
+        <ol class="toc">
+          <li><a href="#clive">Sir Clive</a></li>
+          <li><a href="#cheap">Built to be cheap</a></li>
+          <li><a href="#ula">Ferranti and the ULA</a></li>
+          <li><a href="#clash">Colour clash</a></li>
+          <li><a href="#fans">Bedroom coders and the fans</a></li>
+          <li><a href="#brazil">Brazil: Microdigital's TK90X and TK95</a></li>
+          <li><a href="#measured">The TK90X and the 48K, side by side</a></li>
+          <li><a href="#timex">America: Timex Sinclair</a></li>
+          <li><a href="#emulation">How K-Prompt emulates the ULA</a></li>
+          <li><a href="#siblings">The siblings</a></li>
+          <li><a href="#sources">Sources</a></li>
+        </ol>
+      </header>
+
+      <section class="timeline" aria-label="Timeline">
+        <div><b>1972</b>Sinclair Executive pocket calculator</div>
+        <div><b>Feb 1980</b>ZX80, £99.95 built</div>
+        <div><b>1981</b>ZX81; Microdigital founded in São Paulo</div>
+        <div><b>23 Apr 1982</b>ZX Spectrum: £125 (16K), £175 (48K)</div>
+        <div><b>1983</b>Clive Sinclair knighted; Sinclair loses its case against Microdigital</div>
+        <div><b>Nov 1983</b>Timex Sinclair 2068 in the US</div>
+        <div><b>Dec 1984</b>The scuffle at the Baron of Beef</div>
+        <div><b>10 Jan 1985</b>Sinclair C5</div>
+        <div><b>Jun 1985</b>Microdigital TK90X</div>
+        <div><b>7 Apr 1986</b>Amstrad buys the Sinclair computers, £5 million</div>
+        <div><b>1986</b>TK95</div>
+        <div><b>2010</b>Chris Smith's book on the ULA; TBBlue starts in Brazil</div>
+        <div><b>2017</b>ZX Spectrum Next on Kickstarter</div>
+      </section>
+
+      <section id="clive" class="chapter">
+        <h2><span>1</span>Sir Clive</h2>
+        <div class="cols">
+          <div>
+            <p>
+              <b>Clive Sinclair</b> (1940–2021) left school at 18 and sold
+              miniature electronics kits to hobbyists by post. His company,
+              Sinclair Radionics, made the <b>Sinclair Executive</b> in 1972,
+              "the world's first slimline electronic pocket calculator", and
+              then the Black Watch, a digital watch that was inaccurate and hard
+              to service.
+            </p>
+            <p>
+              Computers came next and sold by the hundred thousand. The
+              <b>ZX80</b> (1980) cost £99.95 built. The <b>ZX81</b> cost £69.95
+              built, or £49.95 as a kit, and sold more than 1.5 million. The
+              <b>Spectrum</b> (1982) sold over five million. He was knighted in
+              1983 "for his contributions to the personal computer industry",
+              and he chaired Mensa from 1980 to 1997.
+            </p>
+            <p>
+              His heart was elsewhere. Jimmy Maher writes that he "really didn't
+              know that much about computers, nor did he care all that much
+              about them". The computers paid for his pocket televisions and
+              his electric vehicle. The <b>C5</b>, a one-seat electric tricycle
+              with a top speed of 15 mph, was launched on 10 January 1985 at a
+              snowy Alexandra Palace, built by Hoover in a washing-machine
+              factory, and was in receivership by October. About 14,000 were
+              made, and sources disagree on how few were sold. The <b>QL</b>,
+              unveiled in January 1984, was promised within 28 days before a
+              working one existed.
+            </p>
+            <p>
+              On 7 April 1986 Sinclair Research sold its computers and the
+              Sinclair name to <b>Amstrad</b> for £5 million. Sir Clive went on
+              with folding bikes (the A-bike), an electric car that never
+              shipped (the X-1), televised poker, and in 2014 a warning that
+              thinking machines would make it "very difficult for us to
+              survive". In 2010 he said he did not use computers.
+            </p>
+          </div>
+          <aside class="callout">
+            <h3>The fight at the Baron of Beef</h3>
+            <p>
+              Chris Curry had worked for Sinclair before founding Acorn, maker
+              of the BBC Micro. In December 1984, the story goes, Sinclair met
+              him in a Cambridge pub, the Baron of Beef. Angry at Acorn adverts
+              that called Sinclair machines shoddy, he hit Curry about the head
+              with a rolled-up newspaper. There was pushing but no punches, and
+              it went on later at a wine bar.
+            </p>
+            <p>
+              A newspaper columnist who was there wrote it up for Christmas
+              Eve, and the tabloids made it a punch-up. Accounts differ on the
+              columnist's name and the cause, and one Acorn veteran did not
+              remember it at all. The BBC made it a scene in <i>Micro Men</i>
+              (2009).
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="cheap" class="chapter">
+        <h2><span>2</span>Built to be cheap</h2>
+        <p class="intro">
+          The Spectrum was launched on 23 April 1982 at £125 for 16K and £175
+          for 48K, cut to £99 and £129 the next year. A Commodore 64 or a BBC
+          Model B cost over £300. Everything about it served that price.
+        </p>
+        <div class="chips">
+          <div class="chip-card"><b>One custom chip</b><span>Richard Altwasser put the video, keyboard, sound and tape logic into a single Ferranti ULA (chapter 3). Beside it: a Z80A at 3.5 MHz, a 16K ROM, the RAM, and very little else.</span></div>
+          <div class="chip-card"><b>Half-bad memory</b><span>The 48K's upper 32K is eight 64K chips with one faulty half, sold cheaply as 32K parts (TI TMS4532, OKI MSM3732). A link on the board picks which half works; all eight must agree.</span></div>
+          <div class="chip-card"><b>Rubber keys</b><span>40 rubber keys over a membrane, likened to "dead flesh". One reviewer wrote that "you need to squeeze the keys rather than press them". Hard keys only came with the Spectrum+ in 1984.</span></div>
+          <div class="chip-card"><b>Keywords on the keys</b><span>Steve Vickers's 16K ROM holds a whole BASIC. Each keyword is one keypress and one byte (P is PRINT), which saved memory and typing; the cursor's <b>K</b> means "a keyword comes next".</span></div>
+          <div class="chip-card"><b>A beeper</b><span>No sound chip: one bit of port FEh drives a small speaker, and the CPU makes every sound by toggling it at the right moments. The manual promised ten octaves.</span></div>
+          <div class="chip-card"><b>Your TV and your tape</b><span>The picture went to a home TV through an RF lead and programs to an ordinary cassette recorder, at about 1,500 baud.</span></div>
+          <div class="chip-card"><b>The rainbow</b><span>Rick Dickinson's black case, with a rainbow stripe across one corner. Thirty-five years later he designed the Next's case too.</span></div>
+          <div class="chip-card"><b>Made by Timex</b><span>The machines were assembled by Timex in Dundee, which also led to the American Timex Sinclairs (chapter 8).</span></div>
+        </div>
+        <p class="muted">
+          Altwasser and Vickers left soon after the launch to found Jupiter
+          Cantab, whose Jupiter Ace ran Forth instead of BASIC. One name
+          suggested for the Spectrum was "Not the BBC Micro".
+        </p>
+      </section>
+
+      <section id="ula" class="chapter">
+        <h2><span>3</span>Ferranti and the ULA</h2>
+        <div class="cols">
+          <div>
+            <p>
+              A <b>ULA</b>, an uncommitted logic array, is a gate array. The
+              chip is made in advance with transistors that do nothing yet, and
+              a customer's design is added as the final metal wiring layers.
+              That is far cheaper than a fully custom chip.
+              <b>Ferranti</b>, the British electronics firm, pioneered bipolar
+              ULAs. Its first notable customer was a Rollei camera in 1972, and
+              its arrays went into the ZX81, the Spectrum, the BBC Micro and the
+              Acorn Electron.
+            </p>
+            <p>
+              The Spectrum's ULA does almost everything that is not the CPU. It
+              reads the screen from RAM and turns it into a TV picture, 50 times
+              a second. It raises the Z80's interrupt at the start of each
+              frame. On I/O port FEh it reads the keyboard, sets the border
+              colour, drives the beeper, and reads and writes the cassette.
+            </p>
+            <p>
+              The screen RAM is shared. While the ULA reads it, a CPU access to
+              4000h–7FFFh has to wait, in the pattern <b>6, 5, 4, 3, 2, 1, 0,
+              0</b> T-states repeating every 8 T-states across each line of the
+              picture. This is "contention", and programs that count cycles
+              (border effects, multicolour, some loaders) depend on it. When
+              the Z80's I register points into that memory, its refresh cycles
+              upset the ULA's fetches and the screen fills with "snow", though
+              the machine keeps running.
+            </p>
+            <p>
+              In 2010 <b>Chris Smith</b> published <i>The ZX Spectrum ULA: How
+              to Design a Microcomputer</i>, the result of reverse-engineering
+              the chip. Its account of the timing, such as the interrupt being
+              held for exactly 32 T-states, is what emulators now rely on.
+            </p>
+          </div>
+          <aside class="callout">
+            <h3>Spectrum ULAs and their fixes</h3>
+            <ul>
+              <li><b>5C102E</b>: Issue 1 boards. Its I/O contention made machine-code keyboard reads unreliable; the fix was the <b>"dead cockroach"</b>, a 74LS00 chip mounted upside down on a little board.</li>
+              <li><b>5C112E</b>: fixed that, but contended ports that should not be; the fix was the <b>"spider"</b>, a transistor, later TR6 on Issue 3 boards.</li>
+              <li><b>6C001E-5, -6, -7</b>: Ferranti's lower-power process, through Issue 3. The -7 is the one documented to work on every 48K issue; late ones say Plessey, which bought Ferranti's chip business in 1988.</li>
+              <li><b>ZX81</b>: the 2C158E, Sinclair's first ULA.</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section id="clash" class="chapter">
+        <h2><span>4</span>Colour clash</h2>
+        <div class="cols">
+          <div>
+            <p>
+              The screen is 256×192 pixels, but colour comes in 8×8 cells. The
+              bitmap takes 6,144 bytes, one bit per pixel. Then 768 bytes give
+              each cell one <b>attribute</b>: an ink colour, a paper colour (eight
+              each), BRIGHT, and FLASH, which swaps ink and paper every 0.64 s.
+              Colour for every pixel would have cost several kilobytes more, on
+              a 16K machine.
+            </p>
+            <p>
+              So a cell can hold two colours. When a yellow sprite walks over a
+              green tree, the tree's cells turn yellow or the sprite turns
+              green: "large ugly fringes of rapidly changing colours". Games
+              answered in several ways: colour only for borders and scores
+              around a monochrome play area; two colours for everything, as in
+              Ultimate's <i>Knight Lore</i>; very careful design, as in
+              <i>Light Force</i>; or monochrome sprites over coloured
+              backgrounds, as in <i>Double Dragon</i>.
+            </p>
+            <p>
+              The bitmap's odd layout (rows in thirds, lines interleaved) was
+              decided under time pressure. It is why Spectrum screens load from
+              tape in that famous venetian-blind order.
+            </p>
+          </div>
+          <aside class="callout">
+            <h3>Cheating the ULA</h3>
+            <p>
+              The ULA reads the attributes again for each of a cell's 8 lines.
+              A program timed to the T-state can change them between lines and
+              get colour on every pixel row, over about 20 columns. Demo coders
+              call it <b>multicolour</b>. Engines such as Nirvana and Bifrost*2
+              put it in games, decades after the machine was sold.
+            </p>
+            <p class="muted">
+              Clash and the beeper became the look and sound of the platform,
+              in the same way the C64 is remembered for its sprites and SID.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="fans" class="chapter">
+        <h2><span>5</span>Bedroom coders and the fans</h2>
+        <div class="cols">
+          <div>
+            <p>
+              A cheap machine with BASIC in ROM and a tape recorder to sell
+              games on started the British games industry. Matthew Smith wrote
+              <i>Manic Miner</i> at 17. Tim and Chris Stamper's
+              <b>Ultimate Play the Game</b> (<i>Jetpac</i>, <i>Knight Lore</i>)
+              became Rare. <b>Ocean</b> in Manchester began as mail-order
+              "Spectrum Games". The Darling brothers founded <b>Codemasters</b>
+              in 1986 for budget games "with the quality of full-priced games".
+            </p>
+            <p>
+              Magazines carried the scene: <b>Sinclair User</b> (1982–93),
+              <b>Crash</b> (1984–92) with Oliver Frey's painted covers, and
+              <b>Your Sinclair</b> (1984–93, born as <i>Your Spectrum</i>), known
+              for its jokes. Programs were printed as listings to type in, for
+              hours, and errors were corrected in the next issue.
+            </p>
+            <p>
+              The fans call it the <b>Speccy</b>, and they never left.
+              <b>World of Spectrum</b> (1995) set out to be "a completely free
+              museum" of its software. <b>Spectrum Computing</b> and its open
+              ZXDB database still add new titles, since new games are written
+              and sold on tape every year. The playground argument with
+              Commodore 64 owners has never quite ended.
+            </p>
+          </div>
+          <aside class="callout">
+            <h3>The ZX Spectrum Next</h3>
+            <p>
+              A Spectrum rebuilt in an FPGA, compatible with the old software
+              and much more. It began in <b>Brazil in 2010</b> as TBBlue, a
+              variant of the TK95, by Victor Trucco and Fábio Belavenuto, the
+              same pair who cloned the TK90X's ULA (chapter 6). Henrique
+              Olifiers took it to the UK. Rick Dickinson designed the case and
+              died during development. Its 2017 Kickstarter raised £723,390,
+              and later ones more.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="brazil" class="chapter">
+        <h2><span>6</span>Brazil: Microdigital's TK90X and TK95</h2>
+        <div class="cols">
+          <div>
+            <p>
+              From 1979, Brazil reserved its computer market for national
+              companies through the <b>SEI</b>, the Special Secretariat for
+              Informatics. Lei 7.232 of October 1984 made the policy law (the
+              same <i>reserva de mercado</i> that shaped Brazil's MSXs, told on
+              <a href="https://ok-prompt.stern.workers.dev/history.html">Ok-Prompt's page</a>).
+              Foreign computers could not be imported, but they could be
+              copied.
+            </p>
+            <p>
+              <b>Microdigital Eletrônica</b> was founded in São Paulo in 1981 by
+              the brothers <b>Tomas and Jorge (George) Kovari</b>; "TK" is their
+              initials. Its first machines copied Sinclair's: the TK80 (a ZX80),
+              then the TK82C and TK85 (ZX81s). Those had no ULA. A dozen TTL
+              chips did its work, so they ran warmer. In 1983 Sinclair Research
+              sued Microdigital in Brazil for copyright infringement and lost:
+              the court treated the ROM as part of the hardware, not as
+              protected software. Brazil's software law only came in 1987.
+            </p>
+            <p>
+              The <b>TK90X</b> followed in June 1985: a 48K Spectrum in a
+              slightly taller case, with 40 rubber keys, a built-in joystick
+              port on an Atari connector, and sound through the TV instead of
+              a speaker. It sold about 2,500 a month in late 1986. The
+              <b>TK95</b> (1986) put the same machine in a case borrowed from
+              the Commodore Plus/4, with a 57-key keyboard. Its introductory
+              price was Cz$ 4,559. Brazil's MSXs, the Expert and the Hotbit,
+              overshadowed both, and Microdigital was gone by 1990.
+            </p>
+          </div>
+          <div class="machines">
+            <article>
+              <h3>Cloning the ULA</h3>
+              <p>
+                This time Microdigital made a chip. The TK90X's ULA, marked
+                <b>MC16845</b>, is its own design. Wikipedia says it was
+                reverse-engineered as CMOS from Ferranti's bipolar original.
+                It fits the same socket pin for pin, with one addition:
+                <b>pin 1 selects 50 or 60 Hz</b>. Former Microdigital
+                engineer Cláudio Cassens says the "national ULA" took about a
+                year. Who fabricated it is not known: the documentation
+                "seems to be irretrievably lost".
+              </p>
+              <p>
+                It is not an exact copy. It runs from a 14.3 MHz crystal (four
+                times Brazil's colour subcarrier), so the Z80 runs at
+                <b>3.5756 MHz</b>, and every line is 228 T-states, not 224.
+                Brazilian TVs are PAL-M, 60 Hz, so a TK90X draws 262 lines
+                59.86 times a second (chapter 7). Some TK90Xs built for
+                Argentina carry genuine Ferranti ULAs, one dated January 1985,
+                and how Microdigital got them is a mystery.
+              </p>
+              <p class="muted">
+                In 2012–13 Victor Trucco and Fábio Belavenuto cloned the
+                Microdigital ULA in a CPLD, "the component that until then was
+                irreplaceable", and published it as open hardware.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="measured" class="chapter">
+        <h2><span>7</span>The TK90X and the 48K, side by side</h2>
+        <p class="intro">
+          Rows marked <span class="measured">measured</span> come from the
+          original ROMs running in K-Prompt (<code>tests/zx.test.ts</code>). The
+          timing comes from the Cantinho do TK90X blog's measurements of a
+          real machine.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>ZX Spectrum 48K</th><th>TK90X and TK95</th></tr></thead>
+            <tbody>
+              <tr><th>ROM</th><td>16K, Sinclair</td><td>The same 16K with 1,980 bytes changed. The TK90X and TK95 ROMs here differ only in their 20-byte banner <span class="measured">measured</span></td></tr>
+              <tr><th>Power-on</th><td>© 1982 Sinclair Research Ltd, then a clear screen</td><td>"TK90X - Color Computer" or "TK Color Computer" with a colour bar. The banner stays at the top while you work <span class="measured">measured</span></td></tr>
+              <tr><th>Reports</th><td><code>0 OK, 0:1</code></td><td><code>0 Ok 0:1</code>, in Portuguese: <code>NEXT sem FOR</code>, <code>Sem memoria</code>, <code>Ligue o gravador, digite ENTER</code> <span class="measured">measured</span></td></tr>
+              <tr><th>Spanish</th><td>None</td><td>A second, Spanish copy of the messages fills the ROM's spare space ("Conecte grabador, digite ENTER"). How it is selected was not found <span class="measured">measured</span></td></tr>
+              <tr><th>Keywords</th><td>BEEP, GO TO, GO SUB, CONTINUE, RANDOMIZE</td><td>SOUND, GOTO, GOSUB, CONT, RAND: the same tokens, new names <span class="measured">measured</span></td></tr>
+              <tr><th>SYMBOL SHIFT + X</th><td>£</td><td>The <b>UDG</b> command <span class="measured">measured</span></td></tr>
+              <tr><th>UDG</th><td>UDGs start as copies of A–U</td><td><code>UDG</code> loads Portuguese letters into the UDGs: Á É Í Ó Ú á é í ó ú À à Â â Ê ê ô ã õ Ç ç. <code>UDG 1</code> loads a set with ñ, Ñ and ü. <code>UDG 2</code> opens a character editor <span class="measured">measured</span></td></tr>
+              <tr><th>Clock</th><td>3.5 MHz</td><td>3.575611 MHz</td></tr>
+              <tr><th>Line</th><td>224 T-states</td><td>228 T-states</td></tr>
+              <tr><th>Frame</th><td>312 lines, 69,888 T, 50.08 Hz</td><td>262 lines, 59,736 T, 59.86 Hz (PAL-M). With pin 1 switched, 312 lines, 71,136 T, 50.26 Hz</td></tr>
+              <tr><th>Effect</th><td>The reference</td><td>Games timed by the interrupt run about a fifth faster, BEEP plays 2% sharp, and border and multicolour effects tuned to the 48K break</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">
+          pt.wikipedia also mentions a TRACE command and gives 90–95%
+          compatibility with the Spectrum. TRACE is not in the TK90X ROM's
+          keyword table, so K-Prompt has not confirmed it. K-Prompt offers the
+          TK's video as 60 Hz, 50 Hz or a Ferranti ULA.
+        </p>
+      </section>
+
+      <section id="timex" class="chapter">
+        <h2><span>8</span>America: Timex Sinclair</h2>
+        <p>
+          Timex, which built Sinclair's machines in Dundee, sold them in the
+          United States as a joint venture. The <b>TS1000</b> (July 1982) was a
+          ZX81 with 2K, "the first home computer to cost under $100", and sold
+          about 550,000 that year. The <b>TS1500</b> (1983) was a 16K ZX81 in a
+          Spectrum-style case.
+        </p>
+        <p>
+          The <b>TS2068</b> (November 1983, $199) was the American Spectrum,
+          with more than a new name. It had an AY-3-8912 sound chip, two
+          joystick ports, a cartridge slot, a 24K ROM, and an SCLD chip in place
+          of the ULA with extra screen modes (dual screen, 512-pixel high
+          resolution). The price of all that was compatibility: fewer than one
+          in ten Spectrum machine-code programs ran on it. Timex left the US
+          market in early 1984, but Timex Portugal carried on with the TC 2048
+          and TC 2068.
+        </p>
+      </section>
+
+      <section id="emulation" class="chapter">
+        <h2><span>9</span>How K-Prompt emulates the ULA</h2>
+        <p class="intro">
+          K-Prompt has no ULA chip to copy. It reproduces what the ULA does,
+          at the moments it does it, counted in the Z80's T-states.
+        </p>
+        <div class="chips">
+          <div class="chip-card"><b>The frame</b><span>Each frame is 69,888 T-states of Z80 time (59,736 on a TK at 60 Hz). For the first 32 the interrupt line is low, and the CPU takes it if it is listening, as on the real machine. Then the program runs until the frame is spent.</span></div>
+          <div class="chip-card"><b>The picture</b><span>A line is drawn once the CPU's T-state count has passed its end, so a program that changes the screen mid-frame is seen mid-frame. The bitmap's thirds and interleaved lines are decoded as the ULA fetches them.</span></div>
+          <div class="chip-card"><b>The border</b><span>Every OUT to port FEh is kept with its T-state. Each border pixel takes the colour in force when the beam passed it, so loading stripes and border effects land where they did on a TV.</span></div>
+          <div class="chip-card"><b>FLASH</b><span>Ink and paper swap every 16 frames, 0.64 s on a 48K.</span></div>
+          <div class="chip-card"><b>The keyboard</b><span>Reading port FEh, the high address byte picks half-rows of keys, and several half-rows AND together, so games that scan the whole keyboard at once work.</span></div>
+          <div class="chip-card"><b>The beeper</b><span>EAR and MIC changes are noted with their T-state. Each sound sample is the average level over its slice of the frame, which keeps the square waves clean.</span></div>
+          <div class="chip-card"><b>The tape</b><span>Standard blocks are copied in at once by catching the ROM's LD-BYTES. Others play in real time as pulses on the EAR bit: the ROM, or a turbo loader, decodes them itself and the border stripes.</span></div>
+          <div class="chip-card"><b>Not yet</b><span>Contention (the 6,5,4,3,2,1,0,0 delays) and the floating bus are not emulated yet. Most software does not notice; multicolour engines and some loaders do.</span></div>
+        </div>
+      </section>
+
+      <section id="siblings" class="chapter try">
+        <h2><span>10</span>The siblings</h2>
+        <p>
+          K-Prompt is the third of a family, each named after the prompt its
+          machine waits at, and all on the same Z80 core.
+          <a href="https://a-prompt.stern.workers.dev"><b>A-Prompt</b></a> runs
+          CP/M 2.2 and its <code>A&gt;</code>.
+          <a href="https://ok-prompt.stern.workers.dev"><b>Ok-Prompt</b></a> is an
+          MSX, which answers <code>Ok</code>, as the TK90X does. All three have a
+          telnet modem that dials BBSes.
+        </p>
+        <a class="cta" href="./">Switch it on →</a>
+      </section>
+
+      <section id="sources" class="chapter sources">
+        <h2>Sources</h2>
+        <ul>
+          <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Clive_Sinclair">Clive Sinclair</a>, <a href="https://en.wikipedia.org/wiki/Sinclair_Research">Sinclair Research</a>, <a href="https://en.wikipedia.org/wiki/Sinclair_C5">Sinclair C5</a>, <a href="https://en.wikipedia.org/wiki/The_Baron_of_Beef">The Baron of Beef</a>, <a href="https://en.wikipedia.org/wiki/ZX_Spectrum">ZX Spectrum</a>, <a href="https://en.wikipedia.org/wiki/ZX_Spectrum_graphic_modes">ZX Spectrum graphic modes</a>, <a href="https://en.wikipedia.org/wiki/Attribute_clash">Attribute clash</a>, <a href="https://en.wikipedia.org/wiki/Gate_array">Gate array</a>, <a href="https://en.wikipedia.org/wiki/Jupiter_Ace">Jupiter Ace</a></li>
+          <li>Jimmy Maher, The Digital Antiquarian: <a href="https://www.filfre.net/2013/12/this-tormented-business-part-1/">This Tormented Business, part 1</a> and <a href="https://www.filfre.net/2014/02/this-tormented-business-part-2/">part 2</a>; <a href="https://virtuallyfun.com/2022/03/30/the-slap-heard-around-the-world/">VirtuallyFun on the Baron of Beef</a></li>
+          <li><a href="https://www.theguardian.com/technology/2021/sep/16/home-computing-pioneer-sir-clive-sinclair-dies-aged-81">The Guardian obituary</a>, <a href="https://www.theguardian.com/technology/2010/feb/28/clive-sinclair-interview-simon-garfield">The Guardian interview (2010)</a>, <a href="https://www.bbc.co.uk/news/technology-30333671">BBC (2014)</a>, <a href="https://www.wired.com/2010/11/sinclair-x-1-sir-clive-tries-another-electric-bike/">Wired on the X-1</a>, <a href="https://www.computinghistory.org.uk/det/57231/Amstrad-Buys-Sinclair-Research-IP">Centre for Computing History: Amstrad</a></li>
+          <li><a href="https://users.ox.ac.uk/~uzdm0006/scans/speccy">Your Computer, June 1982 review (scan)</a>, <a href="https://www.theregister.com/2012/04/23/retro_week_sinclair_zx_spectrum_at_30/?page=4">The Register at 30</a>, <a href="https://www.nme.com/features/zx-spectrum-at-40-a-look-back-3162913">NME at 40</a>, <a href="https://wiki.retrotechcollection.com/Sinclair_ZX_Spectrum_General_Maintenance">RetroTechCollection: maintenance</a></li>
+          <li><a href="https://worldofspectrum.org/faq/reference/48kreference.htm">World of Spectrum 48K reference</a>, <a href="https://www.spectrumforeveryone.com/technical/zx-spectrum-ula-types/">Spectrum for Everyone: ULA types</a>, Chris Smith, <i>The ZX Spectrum ULA</i> (2010, ISBN 978-0956507105), <a href="https://spectrumcomputing.co.uk/forums/viewtopic.php?p=134325">Spectrum Computing forum on the 32 T interrupt</a></li>
+          <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Ultimate_Play_the_Game">Ultimate</a>, <a href="https://en.wikipedia.org/wiki/Ocean_Software">Ocean</a>, <a href="https://en.wikipedia.org/wiki/Codemasters">Codemasters</a>, <a href="https://en.wikipedia.org/wiki/Sinclair_User">Sinclair User</a>, <a href="https://en.wikipedia.org/wiki/Crash_(magazine)">Crash</a>, <a href="https://en.wikipedia.org/wiki/Your_Sinclair">Your Sinclair</a>, <a href="https://en.wikipedia.org/wiki/ZX_Spectrum_Next">ZX Spectrum Next</a>; <a href="https://live.worldofspectrum.org/knowledge_base/wos-overview/who-runs-this-thing">World of Spectrum</a>, <a href="https://spectrumcomputing.co.uk/">Spectrum Computing</a></li>
+          <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Microdigital_Eletronica">Microdigital Eletronica</a>, <a href="https://pt.wikipedia.org/wiki/Microdigital_Eletr%C3%B4nica">Microdigital Eletrônica (português)</a>, <a href="https://en.wikipedia.org/wiki/TK82C">TK82C</a>, <a href="https://en.wikipedia.org/wiki/TK85">TK85</a>, <a href="https://en.wikipedia.org/wiki/TK90X">TK90X</a>, <a href="https://pt.wikipedia.org/wiki/TK90X">TK90X (português)</a>, <a href="https://en.wikipedia.org/wiki/TK95">TK95</a>; <a href="https://planalto.gov.br/ccivil_03/Leis/L7232.htm">Lei 7.232</a>; <a href="https://museucapixaba.com.br/hoje/microcomputador-microdigital-tk-90x-de-1985/">Museu Capixaba</a>; <a href="https://spectrumcomputing.co.uk/entry/1000504">Spectrum Computing: TK90X</a></li>
+          <li>Cantinho do TK90X: <a href="https://cantinhotk90x.blogspot.com/2012/04/temporizacao-de-video-do-tk90x-parte-1.html">video timing, part 1</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/determinacao-da-frequencia-do-tk90x.html">the clock</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/temporizacao-de-video-da-ula-e-do-clone.html">60 Hz timing</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/temporizacao-de-video-da-ula-e-do-clone_27.html">50 Hz timing</a>, <a href="https://cantinhotk90x.blogspot.com/2012/12/ula-do-tk90x-clonado.html">the ULA cloned</a>; <a href="https://www.victortrucco.com/TK/TK90XArgentino/TK90XArgentino">Victor Trucco, "O TK90X Argentino"</a>; <a href="https://github.com/fbelavenuto/tk90x_ula">fbelavenuto/tk90x_ula</a>; <a href="https://github.com/EremusOne/ESPectrum">ESPectrum</a></li>
+          <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Timex_Sinclair">Timex Sinclair</a>, <a href="https://en.wikipedia.org/wiki/Timex_Sinclair_2068">Timex Sinclair 2068</a></li>
+          <li>Measurements: the 48K, TK90X and TK95 ROMs run in K-Prompt (<code>tests/zx.test.ts</code>).</li>
+        </ul>
+      </section>
+
+      <footer class="foot">
+        K-Prompt · © 2026 Eduardo Stern ·
+        Sinclair and ZX Spectrum are trademarks of their owners; TK90X and TK95 were Microdigital's
+      </footer>
+    </div>
+    <script type="module" src="./src/history.ts"></script>
   </body>
 </html>
