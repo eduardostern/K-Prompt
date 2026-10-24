@@ -1,11 +1,12 @@
 ; TERM: a 64-column terminal for K-Prompt's telnet modem.
 ;
-; The modem is a Hayes modem on two I/O ports, as A-Prompt's on CP/M and
-; Ok-Prompt's on the MSX:
-;   01BFh  in: status (bit 0 a byte waits, bit 1 ready to send, bit 7 carrier)
-;          out: bit 0 is DTR; 0 hangs up
-;   02BFh  data, both ways: AT commands in command mode, the line when online.
-; BASIC can use it directly: IN 447, IN 703, OUT 703,x.
+; This is the terminal; the way it reaches the modem is in an I/O file
+; assembled after it (scripts/build-term.ts), which gives three routines:
+;   minit   gets the line ready
+;   mpoll   carry set and A = a byte, if one has come; carry clear if not
+;   send    sends A, waiting until the modem can take it
+; and the banner. io-ports.asm (TERM) uses K-Prompt's own modem ports,
+; io-if1.asm (I1TERM) the Interface 1's RS232.
 ;
 ; TERM shows the line 64 columns by 24 rows in a 4-pixel font (Tom Thumb,
 ; at the end), follows the ANSI codes BBSes send (cursor moves, erasing,
@@ -21,8 +22,6 @@
 ; (LAST_K and FLAGS bit 5), so interrupts stay on in IM 1 and IY stays
 ; 5C3Ah. K-Prompt, MIT licence. Build with: npm run tapes
 
-MSTAT   equ 01BFh
-MDATA   equ 02BFh
 LAST_K  equ 5C08h
 MODE    equ 5C41h
 FLAGS2  equ 5C6Ah
@@ -53,9 +52,7 @@ start:  ld a, 0
         ld (MODE), a
         ld hl, banner
         call puts
-        ld bc, MSTAT
-        ld a, 1
-        out (c), a      ; DTR on
+        call minit
         ei
 
 loop:   ld a, (quit)
@@ -65,22 +62,20 @@ loop:   ld a, (quit)
         bit 5, (iy+1)   ; a key from the ROM's keyboard scan?
         call nz, key
         call showcur
-        ld bc, MSTAT
-        in a, (c)
-        rra
+        call mpoll
         jr nc, loop
+        push af
         call hidecur
+        pop af
         ld e, 0         ; at most 256 bytes before looking at the keys again
-rxloop: ld bc, MDATA
-        in a, (c)
-        push de
+rxloop: push de
         call emit
         pop de
         dec e
         jr z, loop
-        ld bc, MSTAT
-        in a, (c)
-        rra
+        push de
+        call mpoll
+        pop de
         jr c, rxloop
         jr loop
 
@@ -176,18 +171,6 @@ kfound: ld a, 27
 etab:   db 0E3h, 0C4h, 0E0h, 0E4h, 0B4h, 0BCh, 0BDh, 0BBh, 0AFh, 0B0h, 0B1h, 0C0h, 0A7h
         db 0A6h, 0BEh, 0ADh, 0B2h, 0BAh, 0E5h, 0A5h, 0C2h, 0E1h, 0B3h, 0B9h, 0C1h, 0B8h
 
-; Sends A to the modem, waiting until it can take it.
-send:   push bc
-        push af
-        ld bc, MSTAT
-swait:  in a, (c)
-        and 2
-        jr z, swait
-        pop af
-        ld bc, MDATA
-        out (c), a
-        pop bc
-        ret
 
 ; ---- the screen: one character in, ANSI understood ------------------------
 
@@ -809,10 +792,6 @@ clrall: ld hl, 4000h
         ld (curon), a
         ret
 
-banner: db "K-Prompt TERM: 64 columns on the telnet modem.", 13, 10
-        db "Type AT commands: ATI lists the boards, ATDT 1 dials the first.", 13, 10
-        db "EDIT (CAPS SHIFT+1) goes back to BASIC with the call up; RUN 20", 13, 10
-        db "comes back. BREAK sends ESC, EXTEND+letter is CTRL+letter.", 13, 10, 10, 0
 
 ; ---- variables ------------------------------------------------------------
 

@@ -50,7 +50,11 @@ function dataBlock(data: Uint8Array): Uint8Array {
 
 /** A tape with the loader (autostart line 10) and the code at `org`. */
 export function codeTape(name: string, code: Uint8Array, org: number): Uint8Array {
-  const prog = loaderProgram(org - 1, org);
+  return codeTapeWith(name, loaderProgram(org - 1, org), code, org);
+}
+
+/** A program (autostart line 10) that loads the code, then the code at `org`. */
+export function codeTapeWith(name: string, prog: Uint8Array, code: Uint8Array, org: number): Uint8Array {
   const blocks = [header(0, name, prog.length, 10, prog.length), dataBlock(prog), header(3, `${name}code`.slice(0, 10), code.length, org, 32768), dataBlock(code)];
   const out: number[] = [];
   for (const b of blocks) out.push(b.length & 0xff, b.length >> 8, ...b);

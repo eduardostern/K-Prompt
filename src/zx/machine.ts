@@ -387,8 +387,11 @@ export class Spectrum {
         ready: () => (modem.status() & 2) !== 0,
         put: (b) => modem.write(b),
       }, () => {
-        // One bit is 26 x (BAUD + 2) T-states; BAUD is 0 until the ROM sets it up (9600).
-        const baud = this.mem[0x5cc3] | (this.mem[0x5cc4] << 8);
+        // One bit is 26 x (BAUD + 2) T-states. BAUD (5CC3h) is one of the
+        // Interface 1's variables, which exist (CHANS moved up past them)
+        // once its ROM has run; until then the line is at 9600 (BAUD 12).
+        const chans = this.mem[0x5c4f] | (this.mem[0x5c50] << 8);
+        const baud = chans >= 0x5cf0 ? this.mem[0x5cc3] | (this.mem[0x5cc4] << 8) : 0;
         return 26 * ((baud || 12) + 2);
       });
       this.if1 = new Interface1(rom, rs232);

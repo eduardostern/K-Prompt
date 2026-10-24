@@ -32,7 +32,9 @@ floating bus.
 - **Interface 1**: Sinclair's Interface 1 (ROM v2 or v1) with eight
   Microdrives: `FORMAT "m";1;"name"`, `SAVE *"m";1;"prog"`, `LOAD *`, `CAT 1`
   on `.mdr` cartridges kept in the browser. Its RS232 is wired to the
-  telnet modem, so BASIC can call a BBS with `OPEN #4;"b"`.
+  telnet modem, so BASIC can call a BBS with `OPEN #4;"b"`, and
+  `I1TERM.tap` on the shelf is TERM through the Interface 1 at 19200 baud
+  (`programs/io-if1.asm`, with its own bit-timed serial routines).
 - **Quick save and rewind**: F2 keeps the machine in the browser and F3
   brings it back; F4 steps back about five seconds at a time, up to 30.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),

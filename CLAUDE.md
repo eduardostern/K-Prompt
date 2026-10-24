@@ -50,6 +50,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/zx/modem.ts` | Hayes modem with telnet (Ok-Prompt's copy of A-Prompt's), on ports 01BFh/02BFh |
 | `src/phonebook.ts`, `worker/` | BBSes the relay may reach; the Worker's `/relay` WebSocket-to-telnet |
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
+| `programs/io-ports.asm`, `io-if1.asm` | TERM's modem I/O (`minit`, `mpoll`, `send`, banner): K-Prompt's ports, or the IF1's RS232 at 19200 (I1TERM) |
 | `scripts/z80asm.ts`, `build-*.ts` | Assembler (from Ok-Prompt); `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
 | `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
@@ -139,8 +140,15 @@ core tests, every bus event with its T-state) runs in `npm test`.
   goes back. Keys come from the ROM's interrupt (LAST_K, FLAGS bit 5) with
   FLAGS bit 3 set each loop so letters are not keywords. After EXTEND the
   ROM decodes in E mode: a letter arrives as its E-mode token (`etab`).
-- `tests/term.test.ts` checks the committed TERM.tap matches its source;
-  after editing `programs/TERM.asm`, run `npm run tapes`.
+- `tests/term.test.ts` runs TERM and I1TERM through the same steps and
+  checks the committed tapes match their source; after editing
+  `programs/TERM.asm` or an `io-*.asm`, run `npm run tapes`.
+- I1TERM uses its own serial routines, not the ROM's hook codes 1Dh/1Eh:
+  those wait over a frame with interrupts off when nothing comes. Its
+  `mpoll` listens ~1,400 T with CTS up, then does EI: HALT, because the 48K
+  offers its interrupt for only 32 T and the keyboard scan would starve.
+  Its loader runs `FORMAT "b";19200` (BAUD 5: 182 T a bit). Playwright
+  must type into it with a delay between keys (`type(s, { delay: 150 })`).
 - The call sound plays the whole call (dial tone to handshake) before the
   connection opens and holds nothing after: Synchronet probes the terminal
   at once and, answered late, calls it DUMB at 80 columns. Answered in

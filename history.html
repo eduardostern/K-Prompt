@@ -33,6 +33,7 @@
           <li><a href="#brazil">Brazil: Microdigital's TK90X and TK95</a></li>
           <li><a href="#measured">The TK90X and the 48K, side by side</a></li>
           <li><a href="#timex">America: Timex Sinclair</a></li>
+          <li><a href="#if1">The Interface 1 and the Microdrive</a></li>
           <li><a href="#emulation">How K-Prompt emulates the ULA</a></li>
           <li><a href="#siblings">The siblings</a></li>
           <li><a href="#sources">Sources</a></li>
@@ -423,8 +424,35 @@
         </p>
       </section>
 
+      <section id="if1" class="chapter">
+        <h2><span>9</span>The Interface 1 and the Microdrive</h2>
+        <p>
+          Sinclair's answer to the disk drive arrived in 1983: the
+          <b>Interface 1</b>, a wedge under the Spectrum, and the
+          <b>Microdrive</b>, a matchbox-sized drive whose cartridge held a few
+          metres of tape spliced into an endless loop. A cartridge took about
+          85K and found any file in a few seconds, far quicker than a cassette,
+          and up to eight drives chained together. The Interface 1 also had an
+          RS232 port and the ZX Net, a network for up to 64 Spectrums. The QL
+          was built with two Microdrives inside.
+        </p>
+        <p>
+          The Interface 1 has no disk controller and no UART: its 8K "shadow"
+          ROM takes the place of the Spectrum's when BASIC hits something it
+          cannot handle (<code>CAT</code>, <code>FORMAT</code>,
+          <code>OPEN #</code>, <code>SAVE *</code>), and times every bit of the
+          tape and the serial line in software. K-Prompt does the same: the ROM
+          (v2 of 1984, or the first, v1) pages in and out at the addresses the
+          real one does; eight drives read and write <code>.mdr</code>
+          cartridges; and the RS232 is emulated bit by bit, in T-states, at
+          whatever baud the ROM sets. Its other end is the telnet modem, so
+          <code>OPEN #4;"b"</code> in BASIC, or <b>I1TERM</b> on the shelf (TERM,
+          talking through the Interface 1 at 19200 baud), reaches the BBSes.
+        </p>
+      </section>
+
       <section id="emulation" class="chapter">
-        <h2><span>9</span>How K-Prompt emulates the ULA</h2>
+        <h2><span>10</span>How K-Prompt emulates the ULA</h2>
         <p class="intro">
           K-Prompt has no ULA chip to copy. It reproduces what the ULA does,
           at the moments it does it, counted in the Z80's T-states.
@@ -443,7 +471,7 @@
       </section>
 
       <section id="siblings" class="chapter try">
-        <h2><span>10</span>The siblings</h2>
+        <h2><span>11</span>The siblings</h2>
         <p>
           K-Prompt is the third of a family, each named after the prompt its
           machine waits at, and all on the same Z80 core.
@@ -468,7 +496,8 @@
           <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Microdigital_Eletronica">Microdigital Eletronica</a>, <a href="https://pt.wikipedia.org/wiki/Microdigital_Eletr%C3%B4nica">Microdigital Eletrônica (português)</a>, <a href="https://en.wikipedia.org/wiki/TK82C">TK82C</a>, <a href="https://en.wikipedia.org/wiki/TK85">TK85</a>, <a href="https://en.wikipedia.org/wiki/TK90X">TK90X</a>, <a href="https://pt.wikipedia.org/wiki/TK90X">TK90X (português)</a>, <a href="https://en.wikipedia.org/wiki/TK95">TK95</a>; <a href="https://planalto.gov.br/ccivil_03/Leis/L7232.htm">Lei 7.232</a>; <a href="https://museucapixaba.com.br/hoje/microcomputador-microdigital-tk-90x-de-1985/">Museu Capixaba</a>; <a href="https://spectrumcomputing.co.uk/entry/1000504">Spectrum Computing: TK90X</a></li>
           <li>Cantinho do TK90X: <a href="https://cantinhotk90x.blogspot.com/2012/04/temporizacao-de-video-do-tk90x-parte-1.html">video timing, part 1</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/determinacao-da-frequencia-do-tk90x.html">the clock</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/temporizacao-de-video-da-ula-e-do-clone.html">60 Hz timing</a>, <a href="https://cantinhotk90x.blogspot.com/2013/03/temporizacao-de-video-da-ula-e-do-clone_27.html">50 Hz timing</a>, <a href="https://cantinhotk90x.blogspot.com/2012/12/ula-do-tk90x-clonado.html">the ULA cloned</a>; <a href="https://www.victortrucco.com/TK/TK90XArgentino/TK90XArgentino">Victor Trucco, "O TK90X Argentino"</a>; <a href="https://github.com/fbelavenuto/tk90x_ula">fbelavenuto/tk90x_ula</a>; <a href="https://github.com/EremusOne/ESPectrum">ESPectrum</a></li>
           <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/Timex_Sinclair">Timex Sinclair</a>, <a href="https://en.wikipedia.org/wiki/Timex_Sinclair_2068">Timex Sinclair 2068</a></li>
-          <li>Measurements: the 48K, TK90X and TK95 ROMs run in K-Prompt (<code>tests/zx.test.ts</code>).</li>
+          <li>Wikipedia: <a href="https://en.wikipedia.org/wiki/ZX_Interface_1">ZX Interface 1</a>, <a href="https://en.wikipedia.org/wiki/ZX_Microdrive">ZX Microdrive</a>; <a href="https://fuse-emulator.sourceforge.net/">Fuse</a>, whose Interface 1, Microdrive and Z80 core tests K-Prompt follows</li>
+          <li>Measurements: the 48K, TK90X and TK95 ROMs run in K-Prompt (<code>tests/zx.test.ts</code>); the Interface 1's on both ROMs (<code>tests/if1.test.ts</code>).</li>
         </ul>
       </section>
 

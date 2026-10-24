@@ -16,6 +16,7 @@ import romIf1v1Url from './roms/if1-v1.rom?url';
 import { Cartridge } from './zx/microdrive';
 import termTapUrl from './programs/TERM.tap?url';
 import ulaTapUrl from './programs/ULA.tap?url';
+import i1termTapUrl from './programs/I1TERM.tap?url';
 import { inPhoneBook } from './phonebook';
 import type { Dialer, Link, LinkHandlers } from './zx/modem';
 import { withCallSound } from './ui/call-sound';
@@ -601,6 +602,8 @@ async function start(): Promise<void> {
         rewind.clear();
         if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
       } else {
+        // I1TERM talks through the Interface 1: plug one in for it.
+        if (/^i1term/i.test(file.name)) ensureIf1();
         insertTape(file);
         typeLoad();
       }
@@ -724,7 +727,7 @@ async function start(): Promise<void> {
 
   // The built-in programs wait on the shelf from the first visit (and come
   // back if removed), always in their latest version.
-  for (const [name, url] of [['TERM.tap', termTapUrl], ['ULA.tap', ulaTapUrl]]) {
+  for (const [name, url] of [['TERM.tap', termTapUrl], ['I1TERM.tap', i1termTapUrl], ['ULA.tap', ulaTapUrl]]) {
     try { await shelve({ name, data: await bytes(url) }); } catch { /* offline */ }
   }
 

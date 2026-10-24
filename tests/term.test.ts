@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { assembleTerm, buildTermTap } from '../scripts/build-term';
+import { assembleTerm, buildI1termTap, buildTermTap, TermIo } from '../scripts/build-term';
 import { KEYS, Spectrum } from '../src/zx/machine';
 import { CS } from '../src/zx/keyboard';
 import type { Dialer, LinkHandlers } from '../src/zx/modem';
 import { parseTap } from '../src/zx/tape';
 
-const rom = new Uint8Array(readFileSync(new URL('../src/roms/48k.rom', import.meta.url)));
-const committed = new Uint8Array(readFileSync(new URL('../src/programs/TERM.tap', import.meta.url)));
+const file = (path: string) => new Uint8Array(readFileSync(new URL(path, import.meta.url)));
+const rom = file('../src/roms/48k.rom');
 
 /** The 4-pixel font from TERM's code, to read its 64-column screen back. */
 function fontOf(code: Uint8Array): Map<string, string> {
@@ -60,24 +60,33 @@ function run(zx: Spectrum, frames = 10) {
   for (let i = 0; i < frames; i++) zx.runFrame();
 }
 
-describe('TERM', () => {
-  it('the committed TERM.tap is built from programs/TERM.asm (npm run tapes)', () => {
-    expect(Array.from(buildTermTap())).toEqual(Array.from(committed));
+/** TERM on K-Prompt's modem ports; I1TERM on the Interface 1's RS232, at 19200 baud. */
+const TERMS: { name: string; io: TermIo; build: () => Uint8Array; banner: string; below: number }[] = [
+  { name: 'TERM', io: 'ports', build: buildTermTap, banner: 'K-Prompt TERM: 64 columns on the telnet modem.', below: 5 },
+  { name: 'I1TERM', io: 'if1', build: buildI1termTap, banner: 'K-Prompt I1TERM: 64 columns on the Interface 1\'s RS232,', below: 6 },
+];
+
+for (const { name, io, build, banner, below } of TERMS) describe(name, () => {
+  const committed = file(`../src/programs/${name}.tap`);
+
+  it(`the committed ${name}.tap is built from programs/TERM.asm and io-${io}.asm (npm run tapes)`, () => {
+    expect(Array.from(build())).toEqual(Array.from(committed));
   });
 
   it('loads from tape, talks to the modem and follows ANSI', () => {
-    const code = assembleTerm();
+    const code = assembleTerm(io);
     const glyphs = fontOf(code);
     const zx = new Spectrum(rom);
+    if (io === 'if1') zx.setInterface1(file('../src/roms/if1-v2.rom'));
     const line = new FakeLine();
     zx.modem.dialer = line.dialer;
     zx.modem.speaker = 0;
     for (let i = 0; i < 150; i++) zx.runFrame();
-    zx.tape = parseTap('TERM.tap', committed);
+    zx.tape = parseTap(`${name}.tap`, committed);
     zx.pressKeys([KEYS.J], [KEYS.SS, KEYS.P], [KEYS.SS, KEYS.P], [KEYS.ENTER]);
     run(zx, 200);
     let text = termText(zx, glyphs);
-    expect(text[0]).toBe('K-Prompt TERM: 64 columns on the telnet modem.');
+    expect(text[0]).toBe(banner);
 
     // AT commands go to the modem, its answers come back on the screen.
     zx.typeText('ati\n');
@@ -126,9 +135,9 @@ describe('TERM', () => {
     zx.pressKeys([KEYS.R]);
     zx.typeText('20\n');
     run(zx, 30);
-    expect(termText(zx, glyphs)[0]).toBe('K-Prompt TERM: 64 columns on the telnet modem.');
+    expect(termText(zx, glyphs)[0]).toBe(banner);
     line.receive('back');
     run(zx, 5);
-    expect(termText(zx, glyphs)[5]).toBe('back');
+    expect(termText(zx, glyphs)[below]).toBe('back'); // the line under the banner
   });
 });
