@@ -40,9 +40,10 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |
 | `src/zx/tape.ts` | `.tap`/`.tzx` blocks: bytes for the LD-BYTES trap, pulses for real-time play |
 | `src/zx/basic.ts` | Listing → tokens (+ 0Eh and the 5-byte number after each number) → a .tap with autostart |
+| `src/zx/rewind.ts` | Rewind ring: a `.z80` every 50 frames (`zx.onFrame`), the last 30; main clears it on reset, model switch and snapshot loads |
 | `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3), 48K and 128K, load and save; `snapshotKind` |
 | `src/main.ts` | Page wiring, frame loop, deck, shelf, keyboard, joystick, gamepad |
-| `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt); call sound (from A-Prompt) |
+| `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt; also the quick-save slot `quick`, named after its model); call sound (from A-Prompt) |
 | `src/zx/modem.ts` | Hayes modem with telnet (Ok-Prompt's copy of A-Prompt's), on ports 01BFh/02BFh |
 | `src/phonebook.ts`, `worker/` | BBSes the relay may reach; the Worker's `/relay` WebSocket-to-telnet |
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |

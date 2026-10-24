@@ -20,7 +20,7 @@ import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { layoutFor } from './zx/legend';
 import { Model, MODELS, Spectrum, TK_VIDEO, TkVideo } from './zx/machine';
-import { isSnapshot, loadSnapshot, machineKind, saveZ80, snapshotKind } from './zx/snapshot';
+import { isSnapshot, loadSnapshot, machineKind, saveSna, saveZ80, snapshotKind } from './zx/snapshot';
 import { programTape, tokenize } from './zx/basic';
 import { blankTape, parseTape, Tape } from './zx/tape';
 import { HEIGHT, WIDTH } from './zx/ula';
@@ -28,7 +28,8 @@ import { audioContext } from './ui/audio';
 import { askConfirm } from './ui/confirm';
 import { waitForPower, warmUp } from './ui/power';
 import { SoundOut } from './ui/sound-out';
-import { loadDeck, loadShelf, saveDeck, shelve, StoredFile, unshelve } from './ui/store';
+import { loadDeck, loadQuick, loadShelf, saveDeck, saveQuick, shelve, StoredFile, unshelve } from './ui/store';
+import { Rewind } from './zx/rewind';
 
 const SAMPLE_RATE = 44100;
 const MAX_FILE = 2 * 1024 * 1024;
@@ -108,6 +109,9 @@ async function start(): Promise<void> {
   const keys = new KeyInput((held) => { zx.hostKeys = held; });
   keys.onSequence = (chords) => zx.pressKeys(...chords);
   setUpModem(zx);
+  // A snapshot every second, the last 30, to step back through.
+  const rewind = new Rewind();
+  zx.onFrame = () => rewind.tick(zx);
   const sound = new SoundOut(SAMPLE_RATE);
   const wrap = $('screen-wrap');
   const canvas = $<HTMLCanvasElement>('screen');
@@ -175,6 +179,7 @@ async function start(): Promise<void> {
     model.value = next;
     save();
     zx.setRom(roms[next], next);
+    rewind.clear();
     fitCanvas();
     applyModel();
     drawKeyboard();
@@ -226,6 +231,7 @@ async function start(): Promise<void> {
   const powerOn = async () => {
     audioContext();
     zx.reset();
+    rewind.clear();
     await warmUp(wrap, isPal());
     running = true;
     showPower();
@@ -239,6 +245,7 @@ async function start(): Promise<void> {
   });
   $('reset').addEventListener('click', () => {
     zx.reset();
+    rewind.clear();
     if (!running) void powerOn();
   });
 
@@ -268,7 +275,9 @@ async function start(): Promise<void> {
     return Boolean(t?.closest('input, select, textarea, dialog'));
   };
   window.addEventListener('keydown', (e) => {
-    if (!running || typing(e) || e.metaKey) return;
+    if (typing(e) || e.metaKey) return;
+    if (HOTKEYS[e.code]) { e.preventDefault(); if (!e.repeat) HOTKEYS[e.code](); return; }
+    if (!running) return;
     if (settings.joystick !== 'none' && STICK_KEYS[e.code]) {
       stick[STICK_KEYS[e.code]] = true;
       applyStick();
@@ -369,6 +378,12 @@ async function start(): Promise<void> {
   const tapeNote = $('tape-note');
   /** The bytes the tape in the deck came from (to keep TZX blocks intact). */
   let tapeSource: StoredFile | null = null;
+  /** A message under the deck stays 4 s before the tape's own label returns. */
+  let noticeUntil = 0;
+  const notice = (text: string) => {
+    tapeNote.textContent = text;
+    noticeUntil = performance.now() + 4000;
+  };
 
   const showTape = () => {
     const t = zx.tape;
@@ -377,6 +392,7 @@ async function start(): Promise<void> {
     tapeLabel.textContent = t ? t.name : 'No tape: click or drop a .tap, .tzx, .z80';
     tapePos.textContent = t ? `${Math.min(t.block + (t.atEnd ? 0 : 1), t.blocks.length)}/${t.blocks.length}` : '';
     const label = t?.blocks[t.block]?.label ?? t?.blocks[t.block - 1]?.label;
+    if (performance.now() < noticeUntil) return;
     tapeNote.textContent = t ? (t.modified ? 'Recorded on this tape: download it with ⤓. ' : '') + (label ?? '') : '';
   };
 
@@ -405,6 +421,7 @@ async function start(): Promise<void> {
   /** Resets and starts the tape: LOAD "" on a 48K, the Tape Loader on a 128K. */
   const typeLoad = () => {
     zx.reset();
+    rewind.clear();
     zx.tape?.rewind();
     zx.typeLoad();
     if (!running) void powerOn();
@@ -455,6 +472,7 @@ async function start(): Promise<void> {
           switchModel(kind === '128k' ? (settings.model === 'plus2' ? 'plus2' : '128k') : kind === 'ts2068' ? 'ts2068' : '48k');
         }
         loadSnapshot(zx, file.name, file.data);
+        rewind.clear();
         if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
       } else {
         insertTape(file);
@@ -463,7 +481,7 @@ async function start(): Promise<void> {
       if (fromOutside) await shelve(file);
       void showShelf();
     } catch (err) {
-      tapeNote.textContent = `Could not load ${file.name}: ${(err as Error).message}`;
+      notice(`Could not load ${file.name}: ${(err as Error).message}`);
     }
   };
 
@@ -494,16 +512,54 @@ async function start(): Promise<void> {
     zx.tape = blankTape();
     tapeSource = null;
     showTape();
-    tapeNote.textContent = 'A blank tape: SAVE "name" records onto it.';
+    notice('A blank tape: SAVE "name" records onto it.');
   });
   $('tape-save').addEventListener('click', () => {
     const t = zx.tape;
     if (!t) return;
     download(t.name.replace(/\.tzx$/i, '.tap'), t.toTap());
   });
+  const stamp = () => `k-prompt-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
   $('snap-save').addEventListener('click', () => {
-    if (running) download(`k-prompt-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.z80`, saveZ80(zx));
+    if (running) download(`${stamp()}.z80`, saveZ80(zx));
   });
+  $('snap-sna').addEventListener('click', () => {
+    if (!running) return;
+    try {
+      download(`${stamp()}.sna`, saveSna(zx));
+    } catch (err) {
+      notice((err as Error).message);
+    }
+  });
+
+  // Quick save (F2) and load (F3): one slot, in this browser, with the model it was made on.
+  const quickSave = async () => {
+    if (!running) return;
+    await saveQuick({ name: settings.model, data: saveZ80(zx) });
+    notice('Quick saved. Quick load (F3) comes back here.');
+  };
+  const quickLoad = async () => {
+    const q = await loadQuick();
+    if (!q) { notice('Nothing quick saved yet (F2 saves).'); return; }
+    const m = q.name as Model;
+    if (m in MODELS && m !== settings.model) switchModel(m);
+    try {
+      loadSnapshot(zx, 'quick.z80', q.data);
+      rewind.clear();
+      if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
+      notice('Back at the quick save.');
+    } catch (err) {
+      notice(`Could not quick load: ${(err as Error).message}`);
+    }
+  };
+  const rewindBack = () => {
+    if (!running) return;
+    notice(rewind.back(zx) ? `Rewound; ${rewind.length - 1} more seconds to go back.` : 'Nothing to rewind yet.');
+  };
+  $('quick-save').addEventListener('click', () => void quickSave());
+  $('quick-load').addEventListener('click', () => void quickLoad());
+  $('rewind').addEventListener('click', rewindBack);
+  const HOTKEYS: Record<string, () => void> = { F2: () => void quickSave(), F3: () => void quickLoad(), F4: rewindBack };
 
   // Paste a listing: tokenized onto a tape, loaded and run.
   const pasteDialog = $<HTMLDialogElement>('paste-dialog');

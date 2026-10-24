@@ -6,6 +6,7 @@ import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80, snapshotKind } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
 import { fiveBytes, programTape, tokenize } from '../src/zx/basic';
+import { Rewind } from '../src/zx/rewind';
 
 const rom = (name: string) => new Uint8Array(readFileSync(new URL(`../src/roms/${name}.rom`, import.meta.url)));
 
@@ -691,5 +692,30 @@ describe('Timex Sinclair 2068', () => {
     zx.cpu.portOut(0xff, 0x40);
     zx.runFrame(); zx.runFrame();
     expect(frames()).toBe((a + 1) & 0xff);
+  });
+});
+
+describe('rewind', () => {
+  it('keeps the last snapshots, one per period, and steps back through them', () => {
+    const zx = boot('48k', 10);
+    const rw = new Rewind(3, 2);
+    // Mark each snapshot with the frame it was taken at.
+    for (let f = 1; f <= 10; f++) { zx.mem[0x8000] = f; rw.tick(zx); }
+    expect(rw.length).toBe(3); // frames 6, 8 and 10; 2 and 4 dropped
+    expect(rw.back(zx, 2)).toBe(true);
+    expect(zx.mem[0x8000]).toBe(8);
+    expect(rw.length).toBe(2);
+    expect(rw.back(zx, 5)).toBe(true); // as far as it goes
+    expect(zx.mem[0x8000]).toBe(6);
+    rw.clear();
+    expect(rw.back(zx)).toBe(false);
+  });
+
+  it('is fed by the machine every frame', () => {
+    const zx = boot('48k', 10);
+    const rw = new Rewind(30, 50);
+    zx.onFrame = () => rw.tick(zx);
+    for (let f = 0; f < 120; f++) zx.runFrame();
+    expect(rw.length).toBe(2);
   });
 });

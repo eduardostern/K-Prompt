@@ -203,6 +203,8 @@ export class Spectrum {
    * plays in real time, stripes and all.
    */
   fastLoad = true;
+  /** Called after every frame (rewind snapshots). */
+  onFrame?: () => void;
   /** Called after SAVE wrote a block onto the tape. */
   onTapeWritten?: (tape: Tape) => void;
   /** T-states from power-on to the start of this frame. */
@@ -507,6 +509,7 @@ export class Spectrum {
     cpu.cycles -= frameT;
     this.frameBase += frameT;
     this.frames++;
+    this.onFrame?.();
   }
 
   /** Whether the tape is turning (playing in real time). */

@@ -27,8 +27,10 @@ floating bus.
   tokenized (numbers get their hidden 5-byte values), put on a tape with an
   autostart line, and loaded by the ROM's own LOAD.
 - **Snapshots**: `.z80` (versions 1 to 3) and `.sna`, 48K and 128K, and
-  `.z80` for the TS2068; save the running machine as a `.z80`. A snapshot
-  switches to the machine it was made on.
+  `.z80` for the TS2068; download the running machine as either. A
+  snapshot switches to the machine it was made on.
+- **Quick save and rewind**: F2 keeps the machine in the browser and F3
+  brings it back; F4 steps back about five seconds at a time, up to 30.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),
   and an on-screen 48K keyboard shows every keyword and symbol; tap it on a
   phone. CAPS and SYMBOL SHIFT latch for one-finger typing.

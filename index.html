@@ -51,7 +51,15 @@
           <label class="check"><input type="checkbox" id="fast-load" /> Load tapes at once</label>
           <label class="check"><input type="checkbox" id="turbo-tape" /> Fast-forward while a tape plays</label>
           <div class="btn-row">
-            <button id="snap-save" class="key-btn" type="button" title="Save the whole machine as a .z80 snapshot">⤓ Snapshot</button>
+            <button id="snap-save" class="key-btn" type="button" title="Download the whole machine as a .z80 snapshot">⤓ .z80</button>
+            <button id="snap-sna" class="key-btn" type="button" title="Download the whole machine as a .sna snapshot">⤓ .sna</button>
+          </div>
+          <div class="btn-row">
+            <button id="quick-save" class="key-btn" type="button" title="Keep the machine as it is now, in this browser (F2)">● Quick save</button>
+            <button id="quick-load" class="key-btn" type="button" title="Go back to the quick save (F3)">▶ Quick load</button>
+          </div>
+          <div class="btn-row">
+            <button id="rewind" class="key-btn" type="button" title="Go back about 5 seconds; again for more, up to 30 (F4)">↶ Rewind</button>
             <button id="paste-open" class="key-btn" type="button" title="Paste a BASIC listing and load it as a program">✎ Listing</button>
           </div>
           <dl class="readout">
@@ -143,6 +151,8 @@
             <dt>Caps</dt><dd>CAPS LOCK</dd>
             <dt>Home</dt><dd>EDIT</dd>
             <dt>[ ] { } \ | ~</dt><dd>typed through E mode</dd>
+            <dt>F2 / F3</dt><dd>quick save / load</dd>
+            <dt>F4</dt><dd>rewind 5 s</dd>
           </dl>
           <p class="note">In K mode each letter key is a keyword: P is PRINT, J is LOAD. Open the keyboard below the tape deck to see them.</p>
           <p class="note" id="gamepad">No gamepad. Plug one in and press a button.</p>
