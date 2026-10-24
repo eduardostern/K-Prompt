@@ -11,6 +11,9 @@ import romTk95Url from './roms/tk95.rom?url';
 import rom128Url from './roms/128k.rom?url';
 import romPlus2Url from './roms/plus2.rom?url';
 import romTs2068Url from './roms/ts2068.rom?url';
+import romIf1v2Url from './roms/if1-v2.rom?url';
+import romIf1v1Url from './roms/if1-v1.rom?url';
+import { Cartridge } from './zx/microdrive';
 import termTapUrl from './programs/TERM.tap?url';
 import ulaTapUrl from './programs/ULA.tap?url';
 import { inPhoneBook } from './phonebook';
@@ -28,7 +31,7 @@ import { audioContext } from './ui/audio';
 import { askConfirm } from './ui/confirm';
 import { waitForPower, warmUp } from './ui/power';
 import { SoundOut } from './ui/sound-out';
-import { loadDeck, loadQuick, loadShelf, saveDeck, saveQuick, shelve, StoredFile, unshelve } from './ui/store';
+import { loadDeck, loadDrive, loadQuick, loadShelf, saveDeck, saveDrive, saveQuick, shelve, StoredFile, unshelve } from './ui/store';
 import { Rewind } from './zx/rewind';
 
 const SAMPLE_RATE = 44100;
@@ -59,11 +62,13 @@ interface Settings {
   keyboard: boolean;
   /** An AY interface on a 48K or TK, at the 128K's ports. */
   ay48: boolean;
+  /** Sinclair's Interface 1, and which ROM it has. */
+  if1: 'off' | 'v2' | 'v1';
 }
 
 const DEFAULTS: Settings = {
   model: '48k', tkVideo: '60', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
-  flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false, ay48: false,
+  flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false, ay48: false, if1: 'off',
 };
 
 function loadSettings(): Settings {
@@ -109,6 +114,10 @@ async function start(): Promise<void> {
   const keys = new KeyInput((held) => { zx.hostKeys = held; });
   keys.onSequence = (chords) => zx.pressKeys(...chords);
   setUpModem(zx);
+  const if1Roms: Record<'v2' | 'v1', Uint8Array> = { v2: await bytes(romIf1v2Url), v1: await bytes(romIf1v1Url) };
+  /** Plugs the Interface 1 in or out as the setting says (resets the machine). */
+  const applyIf1 = () => zx.setInterface1(settings.if1 === 'off' ? null : if1Roms[settings.if1]);
+  applyIf1();
   // A snapshot every second, the last 30, to step back through.
   const rewind = new Rewind();
   zx.onFrame = () => rewind.tick(zx);
@@ -148,6 +157,8 @@ async function start(): Promise<void> {
     document.body.classList.toggle('tk', MODELS[settings.model].tk);
     tkVideoField.hidden = !MODELS[settings.model].tk;
     $('ay48-field').hidden = Boolean(MODELS[settings.model].paged || MODELS[settings.model].timex); // these have their own
+    $('if1-field').hidden = Boolean(MODELS[settings.model].timex);
+    showDrives();
     document.body.classList.toggle('pal', isPal());
   };
   applyModel();
@@ -179,6 +190,7 @@ async function start(): Promise<void> {
     model.value = next;
     save();
     zx.setRom(roms[next], next);
+    applyIf1();
     rewind.clear();
     fitCanvas();
     applyModel();
@@ -427,6 +439,118 @@ async function start(): Promise<void> {
     if (!running) void powerOn();
   };
 
+  // ---- the Microdrives (Interface 1) ----------------------------------------
+
+  const mdrFile = $<HTMLInputElement>('mdr-file');
+  /** The drive the file picker fills (-1: the first empty one). */
+  let mdrTarget = -1;
+  const storeDrive = (n: number) => {
+    const c = zx.if1?.drives[n].cartridge;
+    if (c) c.dirty = false;
+    void saveDrive(n, c ? { name: c.fileName, data: c.toMdr() } : null);
+  };
+  /** Plugs the Interface 1 in (v2) if it is not, so a cartridge has somewhere to go. */
+  const ensureIf1 = () => {
+    if (zx.if1 || zx.timex) return;
+    settings.if1 = 'v2';
+    save();
+    $<HTMLSelectElement>('if1').value = 'v2';
+    applyIf1();
+    notice('Interface 1 plugged in for the Microdrive.');
+  };
+  function insertCartridge(file: StoredFile, drive = mdrTarget): void {
+    if (zx.timex) throw new Error('the TS2068 takes no Interface 1');
+    const c = Cartridge.fromMdr(file.data);
+    c.fileName = file.name;
+    ensureIf1();
+    const drives = zx.if1!.drives;
+    const n = drive >= 0 ? drive : Math.max(0, drives.findIndex((d) => !d.cartridge));
+    drives[n].cartridge = c;
+    mdrTarget = -1;
+    storeDrive(n);
+    notice(`${file.name} is in Microdrive ${n + 1}.`);
+    showDrives();
+  }
+  function showDrives(): void {
+    // Looked up here: applyModel() calls this before the card's code has run.
+    const mdrives = $('mdrives');
+    const mdrList = $('mdr-list');
+    const drives = zx.if1?.drives;
+    mdrives.hidden = !drives;
+    if (!drives) return;
+    mdrList.replaceChildren(...drives.map((d, n) => {
+      const li = document.createElement('li');
+      const c = d.cartridge;
+      li.className = c ? (d.motor ? 'running' : '') : 'empty';
+      const no = document.createElement('span');
+      no.className = 'drive-no';
+      no.textContent = `M${n + 1}`;
+      const btn = (text: string, title: string, cls: string, act: () => void) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = cls;
+        b.textContent = text;
+        b.title = title;
+        b.addEventListener('click', act);
+        return b;
+      };
+      if (!c) {
+        li.append(no,
+          btn('empty', 'Put a cartridge file (.mdr) in this drive', 'shelf-cart', () => { mdrTarget = n; mdrFile.click(); }),
+          btn('＋ Blank', 'A new, unformatted cartridge: FORMAT "m";' + (n + 1) + ';"name"', 'shelf-slot', () => {
+            d.cartridge = Cartridge.blank();
+            d.cartridge.fileName = `blank-m${n + 1}.mdr`;
+            storeDrive(n);
+            showDrives();
+          }));
+        return li;
+      }
+      const name = c.label || '(not formatted)';
+      const wp = btn('WP', 'Write protect', 'shelf-slot', () => { c.writeProtect = !c.writeProtect; storeDrive(n); showDrives(); });
+      wp.setAttribute('aria-pressed', String(c.writeProtect));
+      li.append(no,
+        btn(name + (c.modified ? ' *' : ''), c.fileName, 'shelf-cart', () => {}),
+        wp,
+        btn('⤓', 'Download as .mdr', 'shelf-slot', () => download((c.label || `m${n + 1}`) + '.mdr', c.toMdr())),
+        btn('⏏', 'Eject', 'shelf-del', () => { d.cartridge = null; storeDrive(n); showDrives(); }));
+      return li;
+    }));
+  }
+  mdrFile.addEventListener('change', async () => {
+    const f = mdrFile.files?.[0];
+    mdrFile.value = '';
+    if (f) await open({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) });
+  });
+  $<HTMLSelectElement>('if1').value = settings.if1;
+  $('if1').addEventListener('change', async () => {
+    const sel = $<HTMLSelectElement>('if1');
+    const next = sel.value as Settings['if1'];
+    if (running && !(await askConfirm({
+      title: next === 'off' ? 'Unplug the Interface 1?' : 'Plug in the Interface 1?',
+      message: 'The machine restarts; whatever is in memory is lost. Cartridges stay in their drives.',
+      ok: next === 'off' ? 'Unplug' : 'Plug in',
+    }))) {
+      sel.value = settings.if1;
+      return;
+    }
+    settings.if1 = next;
+    save();
+    applyIf1();
+    rewind.clear();
+    showDrives();
+  });
+  // Cartridges kept from last time.
+  for (let n = 0; n < 8; n++) {
+    const f = await loadDrive(n);
+    if (!f || !zx.if1) continue;
+    try {
+      const c = Cartridge.fromMdr(f.data);
+      c.fileName = f.name;
+      zx.if1.drives[n].cartridge = c;
+    } catch { void saveDrive(n, null); }
+  }
+  showDrives();
+
   const shelfList = $('shelf-list');
   const showShelf = async () => {
     const all = await loadShelf();
@@ -437,7 +561,7 @@ async function start(): Promise<void> {
       pick.className = 'shelf-cart';
       pick.type = 'button';
       pick.textContent = f.name;
-      pick.title = isSnapshot(f.name) ? 'Load this snapshot' : 'Insert this tape and LOAD it';
+      pick.title = isSnapshot(f.name) ? 'Load this snapshot' : /\.mdr$/i.test(f.name) ? 'Put this cartridge in a Microdrive' : 'Insert this tape and LOAD it';
       pick.addEventListener('click', () => void open(f, false));
       const del = document.createElement('button');
       del.className = 'shelf-del';
@@ -460,12 +584,14 @@ async function start(): Promise<void> {
     try {
       if (/\.zip$/i.test(file.name)) {
         const files = unzipSync(file.data);
-        const inner = Object.keys(files).find((n) => /\.(tap|tzx|z80|sna)$/i.test(n));
-        if (!inner) throw new Error('no .tap, .tzx, .z80 or .sna inside this .zip');
+        const inner = Object.keys(files).find((n) => /\.(tap|tzx|z80|sna|mdr)$/i.test(n));
+        if (!inner) throw new Error('no .tap, .tzx, .z80, .sna or .mdr inside this .zip');
         file = { name: inner.split('/').pop()!, data: files[inner] };
       }
       if (file.data.length > MAX_FILE) throw new Error('that file is too big to be a Spectrum tape or snapshot');
-      if (isSnapshot(file.name)) {
+      if (/\.mdr$/i.test(file.name)) {
+        insertCartridge(file);
+      } else if (isSnapshot(file.name)) {
         // A 128K snapshot needs a 128K (and a 48K one a 48K-like machine): switch if it must.
         const kind = snapshotKind(file.name, file.data);
         if (kind && kind !== machineKind(zx)) {
@@ -653,6 +779,10 @@ async function start(): Promise<void> {
       statFrames = 0;
       statTime = now;
       showTape();
+      if (zx.if1) {
+        zx.if1.drives.forEach((d, n) => { if (d.cartridge?.dirty) storeDrive(n); });
+        showDrives();
+      }
     }
     carrier.classList.toggle('on', zx.modem.online);
   };

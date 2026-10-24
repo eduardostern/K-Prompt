@@ -29,6 +29,10 @@ floating bus.
 - **Snapshots**: `.z80` (versions 1 to 3) and `.sna`, 48K and 128K, and
   `.z80` for the TS2068; download the running machine as either. A
   snapshot switches to the machine it was made on.
+- **Interface 1**: Sinclair's Interface 1 (ROM v2 or v1) with eight
+  Microdrives: `FORMAT "m";1;"name"`, `SAVE *"m";1;"prog"`, `LOAD *`, `CAT 1`
+  on `.mdr` cartridges kept in the browser. Its RS232 is wired to the
+  telnet modem, so BASIC can call a BBS with `OPEN #4;"b"`.
 - **Quick save and rewind**: F2 keeps the machine in the browser and F3
   brings it back; F4 steps back about five seconds at a time, up to 30.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),

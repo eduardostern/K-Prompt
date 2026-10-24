@@ -38,6 +38,8 @@
  */
 import { Z80 } from '../z80';
 import { Ay } from './ay';
+import { Interface1 } from './if1';
+import { Rs232 } from './rs232';
 import { Beeper } from './beeper';
 import { KEYS, Key, keysFor, Matrix, SS } from './keyboard';
 import { Modem } from './modem';
@@ -167,6 +169,9 @@ export class Spectrum {
   private readonly chunkMap = new Uint8Array(8);
   /** Home RAM put aside while the EXROM or the dock covers its chunk. */
   private readonly homeChunks = Array.from({ length: 8 }, () => new Uint8Array(0x2000));
+  /** Sinclair's Interface 1, when plugged in (not on the TS2068), and whether its ROM is paged. */
+  if1: Interface1 | null = null;
+  private if1Paged = false;
   /** The tape routines' addresses in this model's ROM. */
   private saBytes = 0x04c2;
   private saLdRet = 0x053f;
@@ -237,7 +242,10 @@ export class Spectrum {
     this.roms = [];
     const timex = Boolean(MODELS[model].timex);
     for (let i = 0; i < (timex ? 0x4000 : rom.length); i += 0x4000) this.roms.push(rom.slice(i, i + 0x4000));
-    if (timex) this.exrom = rom.slice(0x4000, 0x6000);
+    if (timex) {
+      this.exrom = rom.slice(0x4000, 0x6000);
+      this.if1 = null; // its expansion bus takes no Interface 1
+    }
     [this.saBytes, this.saLdRet, this.ldBytes] = TAPE_ENTRIES[timex ? 'timex' : 'spectrum'];
     this.cpu.ulaPort = timex
       ? (port) => { const lo = port & 0xff; return lo === 0xfe || lo === 0xff || lo === 0xf4; }
@@ -297,6 +305,8 @@ export class Spectrum {
     this.cpu.contendedPage.set([0, 1, 0, 0]);
     this.ula.screen = this.mem.subarray(0x4000, 0x8000);
     this.ay.reset();
+    this.if1Paged = false;
+    this.if1?.reset();
     this.cpu.reset();
     this.cpu.cycles = 0;
     this.frames = 0;
@@ -333,7 +343,7 @@ export class Spectrum {
     const rom = (v >> 4) & 1;
     if (rom !== this.romSel) {
       this.romSel = rom;
-      this.mem.set(this.roms[rom], 0);
+      if (!this.if1Paged) this.mem.set(this.roms[rom], 0);
     }
     this.ula.screen = this.bank(v & 8 ? 7 : 5);
   }
@@ -354,8 +364,60 @@ export class Spectrum {
 
   /** Whether the ROM with the tape routines is at 0000h: 48 BASIC, or the TS2068's EXROM. */
   private get basicRom(): boolean {
+    if (this.if1Paged) return false;
     if (this.timex) return this.chunkMap[0] === 1;
     return this.romSel === this.roms.length - 1;
+  }
+
+  // ---- the Interface 1 --------------------------------------------------------
+
+  /**
+   * Plugs in an Interface 1 with this 8K ROM (null unplugs it); resets.
+   * Its RS232 is wired to the modem. Cartridges stay in their drives.
+   */
+  setInterface1(rom: Uint8Array | null): void {
+    if (this.timex) rom = null;
+    const drives = this.if1?.drives.map((d) => d.cartridge);
+    if (!rom) this.if1 = null;
+    else {
+      const modem = this.modem;
+      const rs232 = new Rs232({
+        available: () => (modem.status() & 1) !== 0,
+        take: () => modem.read(),
+        ready: () => (modem.status() & 2) !== 0,
+        put: (b) => modem.write(b),
+      }, () => {
+        // One bit is 26 x (BAUD + 2) T-states; BAUD is 0 until the ROM sets it up (9600).
+        const baud = this.mem[0x5cc3] | (this.mem[0x5cc4] << 8);
+        return 26 * ((baud || 12) + 2);
+      });
+      this.if1 = new Interface1(rom, rs232);
+      drives?.forEach((c, i) => { this.if1!.drives[i].cartridge = c; });
+    }
+    this.reset();
+  }
+
+  /** Pages the Interface 1's ROM in (mirrored over 0000h-3FFFh) or back out. */
+  private pageIf1(on: boolean): void {
+    if (on === this.if1Paged) return;
+    this.if1Paged = on;
+    if (on) {
+      this.mem.set(this.if1!.rom, 0);
+      this.mem.set(this.if1!.rom, 0x2000);
+    } else this.mem.set(this.roms[this.romSel], 0);
+  }
+
+  /** Whether the Interface 1's ROM is paged in now; setting it pages (snapshots). */
+  get if1Active(): boolean {
+    return this.if1Paged;
+  }
+  set if1Active(on: boolean) {
+    if (this.if1) this.pageIf1(on);
+  }
+
+  /** The T-state since power-on (the serial line's clock). */
+  private get now(): number {
+    return this.frameBase + this.cpu.cycles;
   }
 
   // ---- the TS2068's SCLD ----------------------------------------------------
@@ -442,6 +504,7 @@ export class Spectrum {
     if (!(port & 1)) return this.ulaIn(port);
     if (port === MODEM_STATUS) return this.modem.status();
     if (port === MODEM_DATA) return this.modem.read();
+    if (this.if1 && Interface1.owns(port)) return this.if1.read(port, this.now);
     if (this.ayOn && (port & 0xc002) === 0xc000) return this.ay.read();
     if (!(port & 0x20) && this.kempstonAttached) return this.kempston & 0x1f;
     return this.ula.floatingBus(this.busReadT(port));
@@ -473,6 +536,7 @@ export class Spectrum {
       if (lo === 0xf6) return this.ay.write(v, this.cpu.cycles);
       if (lo !== 0xfe) return;
     } else {
+      if (this.if1 && Interface1.owns(port)) this.if1.write(port, v, this.now);
       if (this.paged && !(port & 0x8002)) this.page(v);
       if (this.ayOn && (port & 0x8002) === 0x8000) {
         if (port & 0x4000) this.ay.select(v);
@@ -496,10 +560,15 @@ export class Spectrum {
     while (cpu.cycles < frameT) {
       if (cpu.cycles < intLength && !(this.dec & 0x40)) cpu.interrupt(0xff);
       if (this.tape && (cpu.pc === this.ldBytes || cpu.pc === this.saBytes) && this.basicRom) this.tapeTrap();
+      const pc = cpu.pc;
+      // The Interface 1's ROM comes in at the fetch from 0008h or 1708h, and leaves after the one at 0700h.
+      if (this.if1 && (pc === 0x0008 || pc === 0x1708)) this.pageIf1(true);
       cpu.step();
+      if (pc === 0x0700 && this.if1Paged) this.pageIf1(false);
       this.ula.catchUp(cpu.cycles);
     }
     if (this.tape?.playing) this.playTape(this.frameBase + frameT);
+    this.if1?.rs232.flush(this.frameBase + frameT);
     this.ula.endFrame();
     this.beeper.endFrame(frameT);
     if (this.ayOn) {

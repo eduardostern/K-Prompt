@@ -5,6 +5,7 @@
  *   "shelf:<name>"  every tape or snapshot ever loaded, to pick again later
  *   "deck"          the cassette in the tape deck, with what SAVE recorded
  *   "quick"         the quick-save slot: a .z80, named after its model
+ *   "mdr:<n>"       the cartridge in Microdrive n (0-7), as .mdr
  */
 
 const DB = 'k-prompt';
@@ -47,6 +48,10 @@ export const loadDeck = () => run<StoredFile>('readonly', (s) => s.get('deck'));
 /** The quick-save slot: `name` is the model it was saved on. */
 export const saveQuick = (snap: StoredFile) => put('quick', snap);
 export const loadQuick = () => run<StoredFile>('readonly', (s) => s.get('quick'));
+
+/** The cartridge in Microdrive `n` (null: empty). */
+export const saveDrive = (n: number, file: StoredFile | null) => put(`mdr:${n}`, file);
+export const loadDrive = (n: number) => run<StoredFile>('readonly', (s) => s.get(`mdr:${n}`));
 
 export const shelve = (file: StoredFile) => put(SHELF + file.name, file);
 export const unshelve = (name: string) => put(SHELF + name, null);

@@ -419,6 +419,14 @@ body {
 .shelf:has(li:not(.builtin)) #shelf-empty { display: none; }
 .shelf li.builtin { border-color: rgba(94, 220, 120, 0.45); }
 .shelf li.builtin .shelf-cart { color: var(--green); }
+.mdrives[hidden] { display: none; }
+.mdrives ul { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.mdrives .drive-no { flex: none; padding: 7px 0 7px 9px; font: 12px var(--mono); color: var(--muted); }
+.mdrives li.empty .shelf-cart { color: var(--muted); }
+.mdrives li.running { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mdrives li.running .drive-no { color: var(--accent); }
+.mdrives button[aria-pressed="true"] { color: var(--accent); }
+.mdrives .note { margin: 8px 0 0; }
 .slot.modem .mapper { visibility: hidden; }
 .panel code { font-family: var(--mono); color: var(--accent); }
 .field input[type="password"], .field input[type="text"] {

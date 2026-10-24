@@ -158,6 +158,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
   let ay: Uint8Array | null = null;
   let aySel = 0;
   let hsr = 0, dec = 0;
+  let if1Paged = false;
   if (pc !== 0) {
     // Version 1: 48K only, compressed if bit 5, ending with 00 ED ED 00.
     if (flags & 0x20) {
@@ -172,6 +173,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
     const is128 = zx.paged;
     paging = b[35];
     if (hw === 128) { hsr = b[35]; dec = b[36]; }
+    else if (b[36] === 0xff) if1Paged = true;
     if (b[37] & 4) { aySel = b[38]; ay = b.slice(39, 55); }
     let i = 32 + extra;
     const where: Record<number, number> = { 8: 0x4000, 4: 0x8000, 5: 0xc000 };
@@ -188,6 +190,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
     }
   }
   zx.reset();
+  if (if1Paged) zx.if1Active = true;
   if (zx.paged) {
     for (const [k, data] of banks) zx.bank(k).set(data);
     zx.setPaging(paging);
@@ -228,15 +231,16 @@ export function saveZ80(zx: Spectrum): Uint8Array {
   head[27] = cpu.iff1; head[28] = cpu.iff2; head[29] = cpu.im;
   put(30, 54); put(32, cpu.pc);
   const pages: [number, Uint8Array][] = [];
+  head[36] = zx.if1Active ? 0xff : 0; // the Interface 1's ROM is paged in
   if (zx.paged) {
-    head[34] = zx.model === 'plus2' ? 12 : 4;
+    head[34] = zx.model === 'plus2' ? 12 : zx.if1 ? 5 : 4;
     head[35] = zx.port7ffd;
     head[37] = 4; // the AY's registers follow
     head[38] = zx.ay.selectedRegister;
     head.set(zx.ay.regs, 39);
     for (let n = 0; n < 8; n++) pages.push([3 + n, zx.bank(n)]);
   } else {
-    head[34] = 0;
+    head[34] = zx.if1 ? 1 : 0;
     if (zx.timex) {
       head[34] = 128;
       head[35] = zx.hsr;

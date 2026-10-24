@@ -40,6 +40,9 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |
 | `src/zx/tape.ts` | `.tap`/`.tzx` blocks: bytes for the LD-BYTES trap, pulses for real-time play |
 | `src/zx/basic.ts` | Listing → tokens (+ 0Eh and the 5-byte number after each number) → a .tap with autostart |
+| `src/zx/if1.ts` | Interface 1: ports E7h/EFh/F7h (decoded by A4, A3, odd only), the drive motor shift register |
+| `src/zx/microdrive.ts` | `.mdr` cartridges (254 × 543 + WP byte) and drives, FUSE's access-driven head model |
+| `src/zx/rs232.ts` | The IF1's RS232 bit by bit in T-states, wired to the modem |
 | `src/zx/rewind.ts` | Rewind ring: a `.z80` every 50 frames (`zx.onFrame`), the last 30; main clears it on reset, model switch and snapshot loads |
 | `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3), 48K and 128K, load and save; `snapshotKind` |
 | `src/main.ts` | Page wiring, frame loop, deck, shelf, keyboard, joystick, gamepad |
@@ -92,6 +95,23 @@ core tests, every bus event with its T-state) runs in `npm test`.
   fully decoded (FEh only for the ULA); AY at F5h/F6h, R14 reads the
   joystick (active low: up 1, down 2, left 4, right 8, fire 80h; stick 1
   when A8 is set). `.z80` hardware 128 keeps F4h/FFh in bytes 35/36.
+- Interface 1 (`zx.setInterface1(rom)`, not on the TS2068): its 8K ROM is
+  copied over 0000h and 2000h when an opcode is fetched from 0008h or
+  1708h, and the Spectrum ROM is put back after the fetch at 0700h
+  (`runFrame`). Tape traps are off while it is paged. `.z80` byte 36 = FFh
+  when paged; hardware 1 (48K) or 5 (128K) with it.
+- Microdrives: each E7h byte moves the head one byte; a status read (EFh)
+  counts GAP/SYNC down and, like any EFh access, puts the head back at the
+  start of its header (15 bytes) or record (528). Loaded cartridges are
+  formatted everywhere; `Cartridge.blank()` nowhere until FORMAT writes the
+  preambles (`preamble[]`, FFh = formatted).
+- IF1 RS232: one bit = 26 × (BAUD + 2) T-states (BAUD at 5CC3h, 12 for
+  9600 until set). Lines are inverted: 1 on F7h bit 0 (out) or bit 7 (in) is
+  a start bit or a 0. A byte goes to the Spectrum only while it holds CTS
+  (EFh bit 4); the ROM waits for DTR (EFh in bit 3, the modem can take a
+  byte) before sending. TX is decoded at mid-bit; a start bit gone before
+  its middle is the ROM's last OUT, ignored. The modem is the same object
+  as on 01BFh/02BFh.
 - The ULA answers every even port; keyboard half-row r is selected by a 0
   in address bit 8+r, and several rows AND together. Port 1Fh (A5 low) is
   Kempston. The core passes `A<<8|n` for `IN A,(n)` and BC for `IN r,(C)`.

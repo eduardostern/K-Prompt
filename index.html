@@ -47,6 +47,13 @@
               <option value="4">4x</option>
             </select>
           </label>
+          <label class="field" id="if1-field">Interface 1
+            <select id="if1">
+              <option value="off">None</option>
+              <option value="v2">Interface 1, ROM v2 (1984)</option>
+              <option value="v1">Interface 1, ROM v1 (1983)</option>
+            </select>
+          </label>
           <label class="check" id="ay48-field" title="An AY sound chip at the 128K's ports (FFFDh, BFFDh), as add-on interfaces gave a 48K"><input type="checkbox" id="ay48" /> AY sound chip</label>
           <label class="check"><input type="checkbox" id="fast-load" /> Load tapes at once</label>
           <label class="check"><input type="checkbox" id="turbo-tape" /> Fast-forward while a tape plays</label>
@@ -102,7 +109,14 @@
               </div>
               <p class="note tape-note" id="tape-note"></p>
             </div>
-            <input id="tape-file" type="file" accept=".tap,.tzx,.z80,.sna,.zip" hidden />
+            <input id="tape-file" type="file" accept=".tap,.tzx,.z80,.sna,.mdr,.zip" hidden />
+          </div>
+
+          <div class="shelf mdrives" id="mdrives" aria-label="Microdrives" hidden>
+            <h2>Microdrives</h2>
+            <ul id="mdr-list"></ul>
+            <p class="note">FORMAT "m";1;"name" formats a blank cartridge; SAVE *"m";1;"prog", LOAD *"m";1;"prog" and CAT 1 use it. The RS232 is wired to the modem: try I1TERM.</p>
+            <input id="mdr-file" type="file" accept=".mdr,.zip" hidden />
           </div>
 
           <div class="kbd-wrap">
