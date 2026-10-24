@@ -64,3 +64,17 @@ export const LAYOUT: KeyLegend[][] = [
     { key: 'SPACE', label: 'BREAK SPACE' },
   ],
 ];
+
+/**
+ * Keywords Microdigital renamed in the TK90X and TK95 ROMs (same tokens,
+ * measured on the ROMs' keyword tables): BEEP is SOUND, GO TO and GO SUB
+ * lose their spaces, CONTINUE is CONT and RANDOMIZE is RAND.
+ */
+export const TK_WORDS: Record<string, string> = { BEEP: 'SOUND', 'GO TO': 'GOTO', 'GO SUB': 'GOSUB' };
+
+/** The layout with a machine's own words. */
+export function layoutFor(tk: boolean): KeyLegend[][] {
+  if (!tk) return LAYOUT;
+  const swap = (w?: string) => (w && TK_WORDS[w]) || w;
+  return LAYOUT.map((row) => row.map((k) => ({ ...k, keyword: swap(k.keyword), above: swap(k.above), below: swap(k.below) })));
+}

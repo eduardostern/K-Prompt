@@ -14,7 +14,7 @@ import type { Dialer, Link, LinkHandlers } from './zx/modem';
 import { withCallSound } from './ui/call-sound';
 import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
-import { LAYOUT } from './zx/legend';
+import { layoutFor } from './zx/legend';
 import { CPU_CLOCK, Model, MODELS, Spectrum } from './zx/machine';
 import { isSnapshot, loadSnapshot, saveZ80 } from './zx/snapshot';
 import { blankTape, parseTape, Tape } from './zx/tape';
@@ -133,6 +133,7 @@ async function start(): Promise<void> {
     save();
     zx.setRom(roms[next], next);
     applyModel();
+    drawKeyboard();
   });
 
   const flags: (keyof Settings)[] = ['smooth', 'scanlines', 'curve', 'flicker', 'humbar'];
@@ -250,7 +251,7 @@ async function start(): Promise<void> {
   // down until the next key, so one finger can type shifted keys.
   const latched = new Set<Key>();
   const kbd = $('kbd');
-  for (const row of LAYOUT) {
+  const drawKeyboard = () => kbd.replaceChildren(...layoutFor(settings.model !== '48k').map((row) => {
     const r = document.createElement('div');
     r.className = 'kbd-row';
     for (const k of row) {
@@ -265,8 +266,9 @@ async function start(): Promise<void> {
       b.setAttribute('aria-label', k.keyword ? `${k.label} (${k.keyword})` : k.label);
       r.append(b);
     }
-    kbd.append(r);
-  }
+    return r;
+  }));
+  drawKeyboard();
   const showLatched = () => {
     for (const b of kbd.querySelectorAll<HTMLElement>('.kbd-key')) {
       b.classList.toggle('latched', latched.has(KEYS[b.dataset.key!]));

@@ -4,6 +4,7 @@ import { KEYS, Model, MODELS, Spectrum } from '../src/zx/machine';
 import { HEIGHT, PALETTE, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
+import { TK_WORDS } from '../src/zx/legend';
 
 const rom = (name: string) => new Uint8Array(readFileSync(new URL(`../src/roms/${name}.rom`, import.meta.url)));
 
@@ -73,7 +74,41 @@ describe('48K Spectrum', () => {
   });
 });
 
+/** The ROM's keyword table (tokens A5h-FFh, at 0096h, last letter with bit 7 set). */
+function keywords(r: Uint8Array): string[] {
+  const out: string[] = [];
+  let word = '';
+  for (let i = 0x96; out.length < 91; i++) {
+    word += String.fromCharCode(r[i] & 0x7f);
+    if (r[i] & 0x80) { out.push(word.trim()); word = ''; }
+  }
+  return out;
+}
+
 describe('Microdigital clones', () => {
+  it('rename the keywords the on-screen keyboard says they do', () => {
+    const sinclair = keywords(rom('48k'));
+    for (const model of ['tk90x', 'tk95']) {
+      const tk = keywords(rom(model));
+      const renamed = Object.fromEntries(sinclair.map((w, i) => [w, tk[i]]).filter(([a, b]) => a !== b));
+      expect(renamed).toEqual({ ...TK_WORDS, CONTINUE: 'CONT', RANDOMIZE: 'RAND' });
+    }
+  });
+
+  it('answer Ok, in Portuguese, under their banner', () => {
+    const zx = boot('tk90x', 200);
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('2+2\n');
+    settle(zx);
+    // The banner stays; the report has no comma.
+    expect(zx.screenText().slice(0, 2)).toEqual(['     ' + MODELS.tk90x.banner, '4']);
+    expect(screen(zx)).toContain('0 Ok 0:1');
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('x\n');
+    settle(zx);
+    expect(screen(zx)).toContain('2 Variavel inexiste 0:1');
+  });
+
   it.each(['tk90x', 'tk95'] as const)('%s boots to its own banner', (model) => {
     const zx = boot(model, 200);
     expect(zx.screenText()[0].trim()).toBe(MODELS[model].banner);
