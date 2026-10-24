@@ -43,7 +43,8 @@ exerciser after any change to `src/z80.ts`.
 | `src/zx/modem.ts` | Hayes modem with telnet (Ok-Prompt's copy of A-Prompt's), on ports 01BFh/02BFh |
 | `src/phonebook.ts`, `worker/` | BBSes the relay may reach; the Worker's `/relay` WebSocket-to-telnet |
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
-| `scripts/z80asm.ts`, `build-term.ts` | Assembler (from Ok-Prompt); builds `src/programs/TERM.tap` (`npm run term`) |
+| `scripts/z80asm.ts`, `build-*.ts` | Assembler (from Ok-Prompt); `npm run tapes` builds `src/programs/*.tap` |
+| `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
 | `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom` (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong
@@ -85,13 +86,22 @@ exerciser after any change to `src/z80.ts`.
   FLAGS bit 3 set each loop so letters are not keywords. After EXTEND the
   ROM decodes in E mode: a letter arrives as its E-mode token (`etab`).
 - `tests/term.test.ts` checks the committed TERM.tap matches its source;
-  after editing `programs/TERM.asm`, run `npm run term`.
+  after editing `programs/TERM.asm`, run `npm run tapes`.
 - The call sound plays the whole call (dial tone to handshake) before the
   connection opens and holds nothing after: Synchronet probes the terminal
   at once and, answered late, calls it DUMB at 80 columns. Answered in
   time it reports ANSI 64x24. Same code as A-Prompt and Ok-Prompt.
 - Live checks: Vertrauen (ATDT 1) has its own WebSocket gateway, so it works
   from `vite preview`; the others need `npm run build && npx wrangler dev`.
+
+## ULA.tap (multicolour)
+
+- 48K timing only: IM 2 (table at BD00h, handler RET at BEBEh), a counted
+  delay, then 64 blocks of exactly 224 T that PUSH 12 attributes per pixel
+  line from 160 T into the previous line. Code and tables stay above 8000h,
+  so the count holds on a real 48K without contention emulation.
+- `tests/ula.test.ts` checks every band line's colours over 30 frames and
+  that 600 frames each reach HALT before the next interrupt.
 
 ## Testing tips
 

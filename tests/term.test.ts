@@ -61,7 +61,7 @@ function run(zx: Spectrum, frames = 10) {
 }
 
 describe('TERM', () => {
-  it('the committed TERM.tap is built from programs/TERM.asm (npm run term)', () => {
+  it('the committed TERM.tap is built from programs/TERM.asm (npm run tapes)', () => {
     expect(Array.from(buildTermTap())).toEqual(Array.from(committed));
   });
 

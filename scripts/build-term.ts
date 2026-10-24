@@ -12,7 +12,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { assemble } from './z80asm';
-import { checksum } from '../src/zx/tape';
+import { codeTape } from './tape-file';
 
 export const TERM_ORG = 0x8000;
 
@@ -41,51 +41,7 @@ export function assembleTerm(): Uint8Array {
   return bytes;
 }
 
-/** A number in a BASIC line: its digits, then 0Eh and the 5-byte integer form. */
-function num(n: number): number[] {
-  return [...String(n)].map((c) => c.charCodeAt(0)).concat([0x0e, 0, 0, n & 0xff, n >> 8, 0]);
-}
-
-function line(no: number, body: number[]): number[] {
-  const len = body.length + 1;
-  return [no >> 8, no & 0xff, len & 0xff, len >> 8, ...body, 0x0d];
-}
-
-const CLEAR = 0xfd, LOAD = 0xef, CODE = 0xaf, RANDOMIZE = 0xf9, USR = 0xc0;
-const Q = 0x22, COLON = 0x3a;
-
-export function loaderProgram(): Uint8Array {
-  return Uint8Array.from([
-    ...line(10, [CLEAR, ...num(32767), COLON, LOAD, Q, Q, CODE]),
-    ...line(20, [RANDOMIZE, USR, ...num(TERM_ORG)]),
-  ]);
-}
-
-function header(type: number, name: string, length: number, p1: number, p2: number): Uint8Array {
-  const h = new Uint8Array(19);
-  h[1] = type;
-  for (let i = 0; i < 10; i++) h[2 + i] = i < name.length ? name.charCodeAt(i) : 0x20;
-  h[12] = length & 0xff; h[13] = length >> 8;
-  h[14] = p1 & 0xff; h[15] = p1 >> 8;
-  h[16] = p2 & 0xff; h[17] = p2 >> 8;
-  h[18] = checksum(h.subarray(0, 18));
-  return h;
-}
-
-function dataBlock(data: Uint8Array): Uint8Array {
-  const b = new Uint8Array(data.length + 2);
-  b[0] = 0xff;
-  b.set(data, 1);
-  b[b.length - 1] = checksum(b.subarray(0, b.length - 1));
-  return b;
-}
-
 /** TERM.tap: the loader (autostart line 10), then the code. */
 export function buildTermTap(): Uint8Array {
-  const prog = loaderProgram();
-  const code = assembleTerm();
-  const blocks = [header(0, 'TERM', prog.length, 10, prog.length), dataBlock(prog), header(3, 'TERMcode', code.length, TERM_ORG, 32768), dataBlock(code)];
-  const out: number[] = [];
-  for (const b of blocks) out.push(b.length & 0xff, b.length >> 8, ...b);
-  return Uint8Array.from(out);
+  return codeTape('TERM', assembleTerm(), TERM_ORG);
 }

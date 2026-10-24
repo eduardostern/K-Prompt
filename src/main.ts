@@ -9,6 +9,7 @@ import rom48Url from './roms/48k.rom?url';
 import romTk90xUrl from './roms/tk90x.rom?url';
 import romTk95Url from './roms/tk95.rom?url';
 import termTapUrl from './programs/TERM.tap?url';
+import ulaTapUrl from './programs/ULA.tap?url';
 import { inPhoneBook } from './phonebook';
 import type { Dialer, Link, LinkHandlers } from './zx/modem';
 import { withCallSound } from './ui/call-sound';
@@ -503,9 +504,10 @@ async function start(): Promise<void> {
     if (f) void readFile(f);
   });
 
-  // TERM waits on the shelf from the first visit (and comes back if removed).
-  if (!(await loadShelf()).some((f) => f.name === 'TERM.tap')) {
-    try { await shelve({ name: 'TERM.tap', data: await bytes(termTapUrl) }); } catch { /* offline */ }
+  // The built-in programs wait on the shelf from the first visit (and come
+  // back if removed), always in their latest version.
+  for (const [name, url] of [['TERM.tap', termTapUrl], ['ULA.tap', ulaTapUrl]]) {
+    try { await shelve({ name, data: await bytes(url) }); } catch { /* offline */ }
   }
 
   const deck = await loadDeck();

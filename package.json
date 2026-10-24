@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "deploy": "npm run build && wrangler deploy",
-    "term": "vite-node scripts/make-term.ts"
+    "tapes": "vite-node scripts/make-tapes.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261022.1",

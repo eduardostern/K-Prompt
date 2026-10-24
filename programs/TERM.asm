@@ -19,7 +19,7 @@
 ;
 ; Loads at 8000h (CLEAR 32767). Keys come from the ROM's interrupt
 ; (LAST_K and FLAGS bit 5), so interrupts stay on in IM 1 and IY stays
-; 5C3Ah. K-Prompt, MIT licence. Build with: npm run term
+; 5C3Ah. K-Prompt, MIT licence. Build with: npm run tapes
 
 MSTAT   equ 01BFh
 MDATA   equ 02BFh

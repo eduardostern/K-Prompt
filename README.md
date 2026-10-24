@@ -37,6 +37,10 @@ zexall pass.
   own WebSocket gateway are dialed straight from the browser; the others go
   through the Worker's relay, which only reaches the boards in
   `src/phonebook.ts`.
+- **ULA.tap**, on the shelf: colour clash and multicolour side by side. Two
+  balls drag their colours over a pattern 8×8 cells at a time, and beside
+  them a band whose every pixel line has its own colours, rewritten 64
+  times a frame by code counted to the T-state (`programs/ULA.asm`).
 - **Machines**: ZX Spectrum 48K, TK90X, TK95.
 
 ## Run
