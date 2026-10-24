@@ -90,6 +90,11 @@ export class Tape {
   playing = false;
   /** Blocks recorded with SAVE, appended at the end. */
   modified = false;
+  /**
+   * Machine T-states per tape T-state: tape timings are in T-states of the
+   * 48K's 3.5 MHz, so a faster machine (a TK90X at 3.58 MHz) stretches them.
+   */
+  scale = 1;
 
   constructor(readonly name: string, readonly blocks: Block[]) {}
 
@@ -153,11 +158,11 @@ export class Tape {
       const p = this.current[this.pulse++];
       if (p < 0) {
         if (this.level) { this.level = false; edge?.(this.nextEdge, false); }
-        this.nextEdge += -p;
+        this.nextEdge += -p * this.scale;
       } else {
         this.level = !this.level;
         edge?.(this.nextEdge, this.level);
-        this.nextEdge += p;
+        this.nextEdge += p * this.scale;
       }
     }
   }

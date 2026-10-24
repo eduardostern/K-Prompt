@@ -14,7 +14,7 @@ export class Beeper {
   private carry = 0;
   private out: number[] = [];
 
-  constructor(readonly clock: number, readonly sampleRate: number) {}
+  constructor(public clock: number, readonly sampleRate: number) {}
 
   private ear = false;
   private mic = false;

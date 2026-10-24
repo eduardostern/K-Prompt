@@ -35,22 +35,49 @@ export const CPU_CLOCK = 3_500_000;
 export const MODEM_STATUS = 0x01bf;
 export const MODEM_DATA = 0x02bf;
 
-export const TIMING_48K: Timing = { lineT: 224, frameT: 69_888, displayStart: 14_336 };
+/** Sinclair's ULA (Ferranti): 224 T × 312 lines at 3.5 MHz, 50.08 Hz. */
+export const TIMING_48K: Timing = { clock: CPU_CLOCK, lineT: 224, frameT: 69_888, displayStart: 14_336 };
+
+/**
+ * Microdigital's own ULA in the TK90X and TK95: a 14.318 MHz crystal (four
+ * times the PAL-M/NTSC colour subcarrier) gives 3.575611 MHz, and every line
+ * is 228 T. Brazil's PAL-M television is 60 Hz: 262 lines, 59.86 Hz. Pin 1
+ * of the ULA selects 50 Hz, 312 lines, a common owner's modification.
+ * Measured on a real TK90X by the Cantinho do TK90X blog (2012-13); the
+ * paper's start after the interrupt is ESPectrum's.
+ */
+export const TK_CLOCK = 3_575_611;
+export const TIMING_TK60: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 262, displayStart: 8_760 };
+export const TIMING_TK50: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 312, displayStart: 14_688 };
 
 export type Model = '48k' | 'tk90x' | 'tk95';
+
+/** Which ULA a TK has: Microdigital's at 60 or 50 Hz, or a Ferranti one (some export boards). */
+export type TkVideo = '60' | '50' | 'ferranti';
+
+export const TK_VIDEO: Record<TkVideo, { label: string; timing: Timing }> = {
+  60: { label: 'PAL-M, 60 Hz (Brazil)', timing: TIMING_TK60 },
+  50: { label: '50 Hz (pin 1 switched)', timing: TIMING_TK50 },
+  ferranti: { label: 'Ferranti ULA, as a 48K', timing: TIMING_48K },
+};
 
 export interface ModelInfo {
   label: string;
   /** What the machine shows at power-on, for tests and for the history page. */
   banner: string;
-  timing: Timing;
+  tk: boolean;
 }
 
 export const MODELS: Record<Model, ModelInfo> = {
-  '48k': { label: 'ZX Spectrum 48K', banner: '© 1982 Sinclair Research Ltd', timing: TIMING_48K },
-  tk90x: { label: 'Microdigital TK90X', banner: 'TK90X - Color Computer', timing: TIMING_48K },
-  tk95: { label: 'Microdigital TK95', banner: 'TK Color Computer', timing: TIMING_48K },
+  '48k': { label: 'ZX Spectrum 48K', banner: '© 1982 Sinclair Research Ltd', tk: false },
+  tk90x: { label: 'Microdigital TK90X', banner: 'TK90X - Color Computer', tk: true },
+  tk95: { label: 'Microdigital TK95', banner: 'TK Color Computer', tk: true },
 };
+
+/** The timing of a model, with a TK's choice of ULA. */
+export function timingOf(model: Model, tkVideo: TkVideo = '60'): Timing {
+  return MODELS[model].tk ? TK_VIDEO[tkVideo].timing : TIMING_48K;
+}
 
 // ROM entry points (the same in the 48K, TK90X and TK95 ROMs).
 const SA_BYTES = 0x04c2, SA_LD_RET = 0x053f, LD_BYTES = 0x0556;
@@ -72,6 +99,8 @@ export class Spectrum {
   readonly ula: Ula;
   readonly beeper: Beeper;
   model: Model = '48k';
+  /** The ULA of a TK model (ignored for the 48K). */
+  tkVideo: TkVideo = '60';
   /** Frames run since power-on. */
   frames = 0;
   /** Kempston joystick: bit 0 right, 1 left, 2 down, 3 up, 4 fire. */
@@ -86,7 +115,14 @@ export class Spectrum {
   /** The telnet modem (ports 01BFh and 02BFh). */
   readonly modem = new Modem();
   /** The cassette in the deck. */
-  tape: Tape | null = null;
+  private deck: Tape | null = null;
+  get tape(): Tape | null {
+    return this.deck;
+  }
+  set tape(t: Tape | null) {
+    this.deck = t;
+    if (t) t.scale = this.ula.timing.clock / CPU_CLOCK;
+  }
   /**
    * Standard blocks load at once (LD-BYTES is trapped); off, every tape
    * plays in real time, stripes and all.
@@ -97,8 +133,9 @@ export class Spectrum {
   /** T-states from power-on to the start of this frame. */
   private frameBase = 0;
 
-  constructor(rom: Uint8Array, model: Model = '48k', sampleRate = 44100) {
-    this.ula = new Ula(this.mem, MODELS[model].timing);
+  constructor(rom: Uint8Array, model: Model = '48k', sampleRate = 44100, tkVideo: TkVideo = '60') {
+    this.tkVideo = tkVideo;
+    this.ula = new Ula(this.mem, timingOf(model, tkVideo));
     this.beeper = new Beeper(CPU_CLOCK, sampleRate);
     const cpu = this.cpu;
     cpu.read = (a) => this.mem[a];
@@ -113,8 +150,27 @@ export class Spectrum {
     if (rom.length !== 0x4000) throw new Error('a Spectrum ROM is 16K');
     this.mem.set(rom, 0);
     this.model = model;
-    this.ula.timing = MODELS[model].timing;
+    this.applyTiming();
     this.reset();
+  }
+
+  /** The TK's ULA: 60 Hz, 50 Hz or Ferranti. Takes effect at once. */
+  setTkVideo(v: TkVideo): void {
+    this.tkVideo = v;
+    this.applyTiming();
+  }
+
+  get timing(): Timing {
+    return this.ula.timing;
+  }
+
+  private applyTiming(): void {
+    const t = timingOf(this.model, this.tkVideo);
+    this.ula.timing = t;
+    this.beeper.clock = t.clock;
+    if (this.tape) this.tape.scale = t.clock / CPU_CLOCK;
+    // Keep the CPU inside the (possibly shorter) frame.
+    if (this.cpu.cycles >= t.frameT) this.cpu.cycles = 0;
   }
 
   /** Power cycle: RAM is cleared (the ROM tests and clears it again anyway). */

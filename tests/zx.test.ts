@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { KEYS, Model, MODELS, Spectrum } from '../src/zx/machine';
+import { KEYS, Model, MODELS, Spectrum, TIMING_TK60, TkVideo } from '../src/zx/machine';
 import { HEIGHT, PALETTE, WIDTH } from '../src/zx/ula';
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80 } from '../src/zx/snapshot';
@@ -271,5 +271,64 @@ describe('pasted BASIC', () => {
     expect(list).toContain('  30 FOR i=1 TO 10: LET total=to');
     expect(list).toContain('  50 PRINT 3.5*2,BIN 101,INT PI');
     expect(list).toContain('  60 GO TO 80');
+  });
+});
+
+describe('TK timing', () => {
+  /** Edges per second in the sound of BEEP 1,0 (middle C on the ROM's own delay loop). */
+  function beepRate(model: Model, video?: TkVideo): number {
+    const zx = new Spectrum(rom(model), model, 44100, video);
+    for (let i = 0; i < 200; i++) zx.runFrame();
+    zx.pressKeys([KEYS.CS, KEYS.SS], [KEYS.SS, KEYS.Z]);
+    zx.typeText('1,0\n');
+    for (let i = 0; i < 5000 && zx.busyTyping; i++) zx.runFrame();
+    zx.takeAudio();
+    for (let i = 0; i < 20; i++) zx.runFrame();
+    const s = zx.takeAudio();
+    // Crossings of the middle level (an edge between samples leaves one in-between value).
+    let edges = 0;
+    for (let i = 1; i < s.length; i++) if ((s[i] > 0.375) !== (s[i - 1] > 0.375)) edges++;
+    return edges / (s.length / 44100);
+  }
+
+  it('runs the TK at 60 Hz with 228-T lines, and at 50 Hz or as a Ferranti on request', () => {
+    expect(new Spectrum(rom('tk90x'), 'tk90x').timing).toEqual(TIMING_TK60);
+    expect(TIMING_TK60.frameT).toBe(59_736);
+    expect(new Spectrum(rom('tk90x'), 'tk90x', 44100, '50').timing.frameT).toBe(71_136);
+    expect(new Spectrum(rom('tk90x'), 'tk90x', 44100, 'ferranti').timing.frameT).toBe(69_888);
+    const zx = new Spectrum(rom('tk95'), 'tk95');
+    zx.runFrame();
+    expect(zx.cpu.cycles).toBeLessThan(40);
+  });
+
+  it('plays BEEP higher on the TK clock, as the real one did', () => {
+    const sinclair = beepRate('48k');
+    const tk = beepRate('tk90x', '60');
+    expect(sinclair / 2).toBeGreaterThan(255);
+    expect(sinclair / 2).toBeLessThan(268); // middle C, 261.6 Hz
+    expect(tk / sinclair).toBeCloseTo(3_575_611 / 3_500_000, 1);
+  });
+
+  it('loads a tape in real time at 60 Hz', () => {
+    const zx = boot();
+    zx.tape = blankTape();
+    zx.typeText('10');
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('7\n');
+    zx.pressKeys([KEYS.S]);
+    zx.typeText('"seven"\n');
+    settle(zx, 30);
+    zx.pressKeys([KEYS.ENTER]);
+    settle(zx, 120);
+    const tk = boot('tk90x', 200);
+    tk.fastLoad = false;
+    tk.tape = parseTap('seven.tap', zx.tape.toTap());
+    tk.pressKeys([KEYS.J], [KEYS.SS, KEYS.P], [KEYS.SS, KEYS.P]);
+    tk.typeText('\n');
+    settle(tk, 800);
+    tk.pressKeys([KEYS.R]);
+    tk.typeText('\n');
+    settle(tk);
+    expect(tk.screenText()).toContain('7');
   });
 });

@@ -38,6 +38,8 @@ export const PALETTE: number[] = (() => {
 })();
 
 export interface Timing {
+  /** CPU clock in Hz. */
+  clock: number;
   /** T-states per line. */
   lineT: number;
   /** T-states per frame. */

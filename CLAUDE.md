@@ -51,6 +51,12 @@ exerciser after any change to `src/z80.ts`.
 - Frame: 69,888 T (224 × 312), first display pixel at T 14,336. INT is held
   for the first 32 T only; `runFrame()` offers it before each instruction
   in that window. The data bus reads FFh (IM 2 vector at I·256+FFh).
+- TK90X/TK95 (Microdigital's own ULA): 3.575611 MHz, 228 T per line; 60 Hz
+  PAL-M (262 lines, 59,736 T, paper at 8,760) by default, 50 Hz (312 lines,
+  71,136 T, paper at 14,688) with ULA pin 1 switched, or a Ferranti ULA
+  (48K timing) as on some export boards. `timingOf(model, tkVideo)`. Tape
+  pulses are 3.5 MHz T-states, stretched by `Tape.scale` on the TK clock.
+  Sources: Cantinho do TK90X's measurements, ESPectrum, the CPLD clone.
 - The ULA answers every even port; keyboard half-row r is selected by a 0
   in address bit 8+r, and several rows AND together. Port 1Fh (A5 low) is
   Kempston. The core passes `A<<8|n` for `IN A,(n)` and BC for `IN r,(C)`.

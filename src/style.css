@@ -549,3 +549,4 @@ kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); bor
 .paste-dialog textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #0f1015; color: var(--text); font: 13px var(--mono); resize: vertical; }
 .paste-error { color: var(--red) !important; }
 .paste-error:empty { display: none; }
+.field[hidden] { display: none; }

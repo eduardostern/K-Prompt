@@ -15,7 +15,7 @@ import { withCallSound } from './ui/call-sound';
 import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { layoutFor } from './zx/legend';
-import { CPU_CLOCK, Model, MODELS, Spectrum } from './zx/machine';
+import { Model, MODELS, Spectrum, TK_VIDEO, TkVideo } from './zx/machine';
 import { isSnapshot, loadSnapshot, saveZ80 } from './zx/snapshot';
 import { programTape, tokenize } from './zx/basic';
 import { blankTape, parseTape, Tape } from './zx/tape';
@@ -39,6 +39,7 @@ type Joystick = 'kempston' | 'sinclair' | 'cursor' | 'none';
 
 interface Settings {
   model: Model;
+  tkVideo: TkVideo;
   speed: number;
   fastLoad: boolean;
   turboTape: boolean;
@@ -54,7 +55,7 @@ interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  model: '48k', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
+  model: '48k', tkVideo: '60', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
   flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false,
 };
 
@@ -62,6 +63,7 @@ function loadSettings(): Settings {
   try {
     const s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
     if (!(s.model in MODELS)) s.model = '48k';
+    if (!(s.tkVideo in TK_VIDEO)) s.tkVideo = '60';
     return s;
   } catch {
     return { ...DEFAULTS };
@@ -88,7 +90,7 @@ const ROM_URLS: Record<Model, string> = { '48k': rom48Url, tk90x: romTk90xUrl, t
 async function start(): Promise<void> {
   const roms = {} as Record<Model, Uint8Array>;
   await Promise.all((Object.keys(ROM_URLS) as Model[]).map(async (m) => { roms[m] = await bytes(ROM_URLS[m]); }));
-  const zx = new Spectrum(roms[settings.model], settings.model, SAMPLE_RATE);
+  const zx = new Spectrum(roms[settings.model], settings.model, SAMPLE_RATE, settings.tkVideo);
   const keys = new KeyInput((held) => { zx.hostKeys = held; });
   keys.onSequence = (chords) => zx.pressKeys(...chords);
   setUpModem(zx);
@@ -113,11 +115,23 @@ async function start(): Promise<void> {
   // ---- machine panel -------------------------------------------------------
 
   const badge = $('badge');
+  const tkVideoField = $('tk-video-field');
+  const isPal = () => zx.timing.frameT > 60_000;
   const applyModel = () => {
     badge.textContent = settings.model === '48k' ? 'ZX Spectrum' : settings.model === 'tk90x' ? 'TK 90X' : 'TK 95';
-    document.body.classList.toggle('tk', settings.model !== '48k');
+    document.body.classList.toggle('tk', MODELS[settings.model].tk);
+    tkVideoField.hidden = !MODELS[settings.model].tk;
+    document.body.classList.toggle('pal', isPal());
   };
   applyModel();
+  const tkVideo = $<HTMLSelectElement>('tk-video');
+  tkVideo.value = settings.tkVideo;
+  tkVideo.addEventListener('change', () => {
+    settings.tkVideo = tkVideo.value as TkVideo;
+    save();
+    zx.setTkVideo(settings.tkVideo);
+    applyModel();
+  });
   const model = $<HTMLSelectElement>('model');
   model.value = settings.model;
   model.addEventListener('change', async () => {
@@ -140,7 +154,6 @@ async function start(): Promise<void> {
   const flags: (keyof Settings)[] = ['smooth', 'scanlines', 'curve', 'flicker', 'humbar'];
   const applyLook = () => {
     for (const f of flags) document.body.classList.toggle(f, Boolean(settings[f]));
-    document.body.classList.add('pal');
     sound.volume = settings.volume / 100;
     zx.fastLoad = settings.fastLoad;
   };
@@ -182,7 +195,7 @@ async function start(): Promise<void> {
   const powerOn = async () => {
     audioContext();
     zx.reset();
-    await warmUp(wrap, true);
+    await warmUp(wrap, isPal());
     running = true;
     showPower();
   };
@@ -405,7 +418,7 @@ async function start(): Promise<void> {
       if (file.data.length > MAX_FILE) throw new Error('that file is too big for a 48K Spectrum');
       if (isSnapshot(file.name)) {
         loadSnapshot(zx, file.name, file.data);
-        if (!running) { await warmUp(wrap, true); running = true; showPower(); }
+        if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
       } else {
         insertTape(file);
         typeLoad();
@@ -504,7 +517,6 @@ async function start(): Promise<void> {
 
   // ---- the frame loop ------------------------------------------------------
 
-  const FRAME_MS = (1000 * MODELS[settings.model].timing.frameT) / CPU_CLOCK;
   let last = performance.now();
   let owed = 0;
   let statFrames = 0;
@@ -514,6 +526,7 @@ async function start(): Promise<void> {
   const carrier = $('carrier');
   const loop = (now: number) => {
     requestAnimationFrame(loop);
+    const FRAME_MS = (1000 * zx.timing.frameT) / zx.timing.clock;
     owed += Math.min(now - last, 250);
     last = now;
     if (!running) { owed = 0; return; }
@@ -542,7 +555,7 @@ async function start(): Promise<void> {
     if (now - statTime >= 1000) {
       const f = (statFrames * 1000) / (now - statTime);
       fps.textContent = `${f.toFixed(0)} / s`;
-      mhz.textContent = `${((f * MODELS[settings.model].timing.frameT) / 1e6).toFixed(2)} MHz`;
+      mhz.textContent = `${((f * zx.timing.frameT) / 1e6).toFixed(2)} MHz`;
       statFrames = 0;
       statTime = now;
       showTape();
