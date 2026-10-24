@@ -129,9 +129,20 @@
             <dt>Bksp</dt><dd>DELETE</dd>
             <dt>Esc</dt><dd>BREAK</dd>
             <dt>Caps</dt><dd>CAPS LOCK</dd>
+            <dt>Home</dt><dd>EDIT</dd>
+            <dt>[ ] { } \ | ~</dt><dd>typed through E mode</dd>
           </dl>
           <p class="note">In K mode each letter key is a keyword: P is PRINT, J is LOAD. Open the keyboard below the tape deck to see them.</p>
           <p class="note" id="gamepad">No gamepad. Plug one in and press a button.</p>
+
+          <h2>Modem</h2>
+          <dl class="readout">
+            <dt>Carrier</dt><dd><i id="carrier" class="lamp"></i></dd>
+          </dl>
+          <p class="note">A Hayes modem that dials telnet BBSes. Load <b>TERM.tap</b> from the shelf for a
+            64-column terminal, then <kbd>ATI</kbd> lists the boards and <kbd>ATDT 1</kbd> dials the first.
+            <kbd>Home</kbd> (EDIT) goes back to BASIC with the call up; <kbd>RUN 20</kbd> returns. From BASIC:
+            <kbd>IN 447</kbd> is the status, <kbd>IN 703</kbd> and <kbd>OUT 703,x</kbd> the data.</p>
         </aside>
       </main>
 
@@ -140,7 +151,8 @@
         siblings: <a href="https://a-prompt.stern.workers.dev">A-Prompt</a> (CP/M) and
         <a href="https://ok-prompt.stern.workers.dev">Ok-Prompt</a> (MSX), whose Z80 core it shares ·
         Spectrum ROM © Amstrad, distributed with their permission for emulators ·
-        TK90X and TK95 ROMs © Microdigital
+        TK90X and TK95 ROMs © Microdigital ·
+        TERM's font: Tom Thumb © 1999 Brian J. Swetland, Vassilii Khachaturov, Robey Pointer (BSD licence)
       </footer>
     </div>
     <script type="module" src="./src/main.ts"></script>

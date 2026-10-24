@@ -8,6 +8,11 @@ import { unzipSync } from 'fflate';
 import rom48Url from './roms/48k.rom?url';
 import romTk90xUrl from './roms/tk90x.rom?url';
 import romTk95Url from './roms/tk95.rom?url';
+import termTapUrl from './programs/TERM.tap?url';
+import { inPhoneBook } from './phonebook';
+import type { Dialer, Link, LinkHandlers } from './zx/modem';
+import { withCallSound } from './ui/call-sound';
+import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { LAYOUT } from './zx/legend';
 import { CPU_CLOCK, Model, MODELS, Spectrum } from './zx/machine';
@@ -23,6 +28,7 @@ import { loadDeck, loadShelf, saveDeck, shelve, StoredFile, unshelve } from './u
 const SAMPLE_RATE = 44100;
 const MAX_FILE = 2 * 1024 * 1024;
 const SETTINGS_KEY = 'k-prompt.settings';
+const MODEM_PROFILE = 'k-prompt.modem';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -83,6 +89,8 @@ async function start(): Promise<void> {
   await Promise.all((Object.keys(ROM_URLS) as Model[]).map(async (m) => { roms[m] = await bytes(ROM_URLS[m]); }));
   const zx = new Spectrum(roms[settings.model], settings.model, SAMPLE_RATE);
   const keys = new KeyInput((held) => { zx.hostKeys = held; });
+  keys.onSequence = (chords) => zx.pressKeys(...chords);
+  setUpModem(zx);
   const sound = new SoundOut(SAMPLE_RATE);
   const wrap = $('screen-wrap');
   const canvas = $<HTMLCanvasElement>('screen');
@@ -457,6 +465,11 @@ async function start(): Promise<void> {
     if (f) void readFile(f);
   });
 
+  // TERM waits on the shelf from the first visit (and comes back if removed).
+  if (!(await loadShelf()).some((f) => f.name === 'TERM.tap')) {
+    try { await shelve({ name: 'TERM.tap', data: await bytes(termTapUrl) }); } catch { /* offline */ }
+  }
+
   const deck = await loadDeck();
   if (deck) {
     try { insertTape(deck, false); } catch { void saveDeck(null); }
@@ -473,6 +486,7 @@ async function start(): Promise<void> {
   let statTime = last;
   const fps = $('fps');
   const mhz = $('mhz');
+  const carrier = $('carrier');
   const loop = (now: number) => {
     requestAnimationFrame(loop);
     owed += Math.min(now - last, 250);
@@ -508,6 +522,7 @@ async function start(): Promise<void> {
       statTime = now;
       showTape();
     }
+    carrier.classList.toggle('on', zx.modem.online);
   };
   requestAnimationFrame(loop);
 
@@ -520,6 +535,81 @@ async function start(): Promise<void> {
     await waitForPower(wrap);
     await powerOn();
   }
+}
+
+// ---- the modem ----------------------------------------------------------------
+
+/** A WebSocket call: straight to a board's gateway, or the relay's (which says CONNECT first). */
+function wsCall(url: string, protocols: string[], isRelay: boolean, handlers: LinkHandlers): Link {
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url, protocols);
+  } catch {
+    queueMicrotask(() => handlers.onClose());
+    return { send: () => {}, close: () => {} };
+  }
+  ws.binaryType = 'arraybuffer';
+  if (!isRelay) ws.onopen = () => handlers.onOpen('DIRECT');
+  ws.onmessage = (e: MessageEvent) => {
+    if (typeof e.data !== 'string') handlers.onData(new Uint8Array(e.data as ArrayBuffer));
+    else if (isRelay && e.data === 'CONNECT') handlers.onOpen();
+    else handlers.onData(Uint8Array.from(e.data, (c) => c.charCodeAt(0) & 0xff));
+  };
+  ws.onclose = () => handlers.onClose();
+  return {
+    send: (b) => { if (ws.readyState === WebSocket.OPEN) ws.send(b); },
+    close: () => ws.close(),
+  };
+}
+
+/** Through the Worker relay (worker/index.ts) on the same origin. */
+function relayCall(host: string, port: number, handlers: LinkHandlers): Link {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  return wsCall(`${scheme}://${location.host}/relay?host=${encodeURIComponent(host)}&port=${port}`, [], true, handlers);
+}
+
+/**
+ * Dials a board's own WebSocket gateway when it has one, so the call comes
+ * from the visitor's IP; if that fails before the call is up and the board
+ * is in the phone book, it goes through the relay instead.
+ */
+const dialer: Dialer = (target, handlers) => {
+  if (!target.ws) return relayCall(target.host, target.port, handlers);
+  let opened = false;
+  let closed = false;
+  let current: Link = wsCall(target.ws, ['binary'], false, {
+    onOpen: (info) => { opened = true; handlers.onOpen(info); },
+    onData: (b) => handlers.onData(b),
+    onClose: () => {
+      if (!opened && !closed && inPhoneBook(target.host, target.port)) current = relayCall(target.host, target.port, handlers);
+      else handlers.onClose();
+    },
+  });
+  return {
+    send: (b) => current.send(b),
+    close: () => { closed = true; current.close(); },
+  };
+};
+
+function setUpModem(zx: Spectrum): void {
+  const modem = zx.modem;
+  modem.dialer = withCallSound(dialer, (target) =>
+    modem.speaker === 0 ? undefined : startCallSound(`${target.host}:${target.port}`, modem.volume));
+  modem.terminalType = () => 'ANSI';
+  modem.windowSize = () => [64, 24];
+  try {
+    const saved = localStorage.getItem(MODEM_PROFILE);
+    if (saved) modem.loadProfile(JSON.parse(saved));
+  } catch {
+    /* no saved profile */
+  }
+  modem.onSaveProfile = (profile) => {
+    try {
+      localStorage.setItem(MODEM_PROFILE, JSON.stringify(profile));
+    } catch {
+      /* storage blocked */
+    }
+  };
 }
 
 function escape(s: string): string {

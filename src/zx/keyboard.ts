@@ -16,7 +16,8 @@
  * Spectrum: letters and digits are their own keys, PC Shift is CAPS SHIFT,
  * and each symbol is SYMBOL SHIFT plus the key it is printed on (`"` is
  * SYMBOL SHIFT + P). Backspace, the arrows and Esc are the CAPS SHIFT
- * combinations the Spectrum used for DELETE, the cursor keys and BREAK.
+ * combinations the Spectrum used for DELETE, the cursor keys and BREAK, and
+ * Home is EDIT. `[ ] { } \ | ~` are typed as EXTEND, then SYMBOL SHIFT + key.
  */
 
 /** A key: row × 5 + bit. */
@@ -46,6 +47,14 @@ export const SYMBOLS: Record<string, string> = {
   ':': 'Z', '£': 'X', '?': 'C', '/': 'V', '*': 'B', ',': 'N', '.': 'M',
 };
 
+/**
+ * Symbols only E mode gives: EXTEND (CAPS + SYMBOL SHIFT), then SYMBOL
+ * SHIFT + the key they are printed under.
+ */
+export const EXTENDED: Record<string, string> = {
+  '[': 'Y', ']': 'U', '{': 'F', '}': 'G', '\\': 'D', '|': 'S', '~': 'A', '©': 'P',
+};
+
 /** The keys that type `ch` in L (letter) mode; null for characters the keyboard has no key for. */
 export function keysFor(ch: string): Key[] | null {
   if (ch === '\n' || ch === '\r') return [KEYS.ENTER];
@@ -59,7 +68,7 @@ export function keysFor(ch: string): Key[] | null {
 /** PC keys that are a Spectrum combination whatever character they type. */
 const SPECIAL: Record<string, string[]> = {
   Backspace: ['CS', '0'], ArrowLeft: ['CS', '5'], ArrowDown: ['CS', '6'], ArrowUp: ['CS', '7'],
-  ArrowRight: ['CS', '8'], Escape: ['CS', 'SPACE'], CapsLock: ['CS', '2'], Tab: ['CS', 'SS'],
+  ArrowRight: ['CS', '8'], Escape: ['CS', 'SPACE'], Home: ['CS', '1'], CapsLock: ['CS', '2'], Tab: ['CS', 'SS'],
   Enter: ['ENTER'], NumpadEnter: ['ENTER'], Space: ['SPACE'],
   ShiftLeft: ['CS'], ShiftRight: ['CS'], ControlLeft: ['SS'], ControlRight: ['SS'],
   AltLeft: ['SS'], AltRight: ['SS'],
@@ -95,8 +104,10 @@ export class Matrix {
  */
 export class KeyInput {
   private down = new Map<string, { keys: Key[]; symbol: boolean; at: number }>();
-  /** Keys pressed from elsewhere (the on-screen keyboard, typed text). */
+  /** Keys pressed from elsewhere (the joystick as keys). */
   extra: Key[] = [];
+  /** Types a sequence of chords (for the E-mode symbols); the machine's pressKeys. */
+  onSequence?: (chords: Key[][]) => void;
 
   /** `sink` gets every key held, whenever that changes (the machine's hostKeys). */
   constructor(private readonly sink: (keys: Key[]) => void) {}
@@ -104,6 +115,10 @@ export class KeyInput {
   /** Returns false for keys the Spectrum has no use for (they stay the browser's). */
   keyDown(code: string, key: string): boolean {
     if (this.down.has(code)) return true; // auto-repeat: the Spectrum repeats by itself
+    if (key.length === 1 && EXTENDED[key] && this.onSequence) {
+      this.onSequence([[CS, SS], [SS, KEYS[EXTENDED[key]]]]);
+      return true;
+    }
     let entry: { keys: Key[]; symbol: boolean; at: number } | undefined;
     const at = now();
     const special = SPECIAL[code];

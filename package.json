@@ -3,17 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "K-Prompt — a ZX Spectrum, TK90X and TK95 emulator for the browser, with a Z80 core from A-Prompt",
+  "description": "K-Prompt \u2014 a ZX Spectrum, TK90X and TK95 emulator for the browser, with a Z80 core from A-Prompt",
   "author": "Eduardo Stern <eduardostern@icloud.com>",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p worker && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "term": "vite-node scripts/make-term.ts"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261022.1",
     "@types/node": "^26.6.5",
     "typescript": "^5.6.3",
     "vite": "^6.0.0",

@@ -11,7 +11,10 @@
  * I/O: every even port is the ULA (port FEh). OUT sets the border (bits
  * 0–2), MIC (bit 3) and EAR/beeper (bit 4); IN reads the keyboard half-rows
  * picked by the high address byte (bits 0–4) and EAR input (bit 6). Port
- * 1Fh (address bit 5 low) is the Kempston joystick. Other ports read FFh.
+ * 1Fh (address bit 5 low) is the Kempston joystick. The telnet modem sits
+ * on two fully decoded ports: 01BFh status (bit 0 byte ready, bit 1 can
+ * send, bit 7 carrier; OUT bit 0 is DTR) and 02BFh data, so BASIC can use
+ * it with IN 447, IN 703 and OUT 703,x. Other ports read FFh.
  *
  * The frame (69,888 T-states, 50.08 Hz) starts with the ULA's interrupt,
  * which is held for 32 T-states: a CPU with interrupts disabled for that
@@ -21,11 +24,16 @@
 import { Z80 } from '../z80';
 import { Beeper } from './beeper';
 import { KEYS, Key, keysFor, Matrix, SS } from './keyboard';
+import { Modem } from './modem';
 import { checksum, Tape } from './tape';
 import { Timing, Ula } from './ula';
 import { CF } from '../z80';
 
 export const CPU_CLOCK = 3_500_000;
+
+/** The modem's ports: odd, A5 high (not the ULA, not Kempston), fully decoded. */
+export const MODEM_STATUS = 0x01bf;
+export const MODEM_DATA = 0x02bf;
 
 export const TIMING_48K: Timing = { lineT: 224, frameT: 69_888, displayStart: 14_336 };
 
@@ -75,6 +83,8 @@ export class Spectrum {
   private typeFrame = 0;
   /** Keys held by the host (the PC keyboard), kept while typing runs. */
   hostKeys: Key[] = [];
+  /** The telnet modem (ports 01BFh and 02BFh). */
+  readonly modem = new Modem();
   /** The cassette in the deck. */
   tape: Tape | null = null;
   /**
@@ -136,11 +146,15 @@ export class Spectrum {
       } else ear = this.lastOut & 0x10 ? 0x40 : 0;
       return 0xa0 | ear | this.matrix.read(port >> 8);
     }
+    if (port === MODEM_STATUS) return this.modem.status();
+    if (port === MODEM_DATA) return this.modem.read();
     if (!(port & 0x20)) return this.kempston & 0x1f;
     return 0xff;
   }
 
   private portOut(port: number, v: number): void {
+    if (port === MODEM_STATUS) return this.modem.control(v);
+    if (port === MODEM_DATA) return this.modem.write(v);
     if (port & 1) return;
     const t = this.cpu.cycles;
     if (this.tape?.playing) this.playTape(); // keep the speaker's events in order

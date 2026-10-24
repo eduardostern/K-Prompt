@@ -3,8 +3,10 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './',
-  // ROM images are imported with ?url and served as files.
-  assetsInclude: ['**/*.rom'],
+  // ROM images and tapes are imported with ?url and served as files.
+  assetsInclude: ['**/*.rom', '**/*.tap'],
+  // The modem's relay runs in the Worker: `npx wrangler dev` serves it on 8787.
+  server: { proxy: { '/relay': { target: 'ws://localhost:8787', ws: true } } },
   build: {
     target: 'es2020',
     outDir: 'dist',

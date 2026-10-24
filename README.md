@@ -27,6 +27,13 @@ zexall pass.
   phone. CAPS and SYMBOL SHIFT latch for one-finger typing.
 - **Joysticks**: Kempston, Sinclair or cursor, from the arrow keys or a
   gamepad.
+- **Modem**: a Hayes modem that dials telnet BBSes, on I/O ports BASIC can
+  reach (`IN 447`, `IN 703`, `OUT 703,x`), with the dial tone, ringing and
+  handshake on the speaker. `TERM.tap`, on the shelf, is a 64-column
+  terminal written in Z80 for it (`programs/TERM.asm`). Boards with their
+  own WebSocket gateway are dialed straight from the browser; the others go
+  through the Worker's relay, which only reaches the boards in
+  `src/phonebook.ts`.
 - **Machines**: ZX Spectrum 48K, TK90X, TK95.
 
 ## Run
@@ -37,6 +44,12 @@ npm run dev        # http://localhost:5173
 npm test           # vitest; ZEX=1 npx vitest run tests/zex.test.ts for the Z80 exercisers
 npm run build      # static site in dist/
 ```
+
+## Fonts
+
+TERM's 4-pixel font is Tom Thumb (© 1999 Brian J. Swetland and Vassilii
+Khachaturov, portions © Dan Marks, readability changes by Robey Pointer),
+under the 3-clause BSD licence: see [`programs/FONT-LICENSE.txt`](programs/FONT-LICENSE.txt).
 
 ## ROMs
 

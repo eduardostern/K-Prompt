@@ -38,7 +38,11 @@ exerciser after any change to `src/z80.ts`.
 | `src/zx/tape.ts` | `.tap`/`.tzx` blocks: bytes for the LD-BYTES trap, pulses for real-time play |
 | `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3, 48K) load and save |
 | `src/main.ts` | Page wiring, frame loop, deck, shelf, keyboard, joystick, gamepad |
-| `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt) |
+| `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt); call sound (from A-Prompt) |
+| `src/zx/modem.ts` | Hayes modem with telnet (Ok-Prompt's copy of A-Prompt's), on ports 01BFh/02BFh |
+| `src/phonebook.ts`, `worker/` | BBSes the relay may reach; the Worker's `/relay` WebSocket-to-telnet |
+| `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
+| `scripts/z80asm.ts`, `build-term.ts` | Assembler (from Ok-Prompt); builds `src/programs/TERM.tap` (`npm run term`) |
 | `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom` (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong
@@ -63,6 +67,23 @@ exerciser after any change to `src/z80.ts`.
   frames). The 48K ROM's RAM test takes about 1.5 s before the © message.
 - `screenText()` matches screen cells against the font at CHARS+256; CHARS
   is 0 until the ROM sets it, then 3C00h.
+
+## The modem and TERM
+
+- Ports are fully decoded 16-bit: status 01BFh (447), data 02BFh (703). Odd
+  with A5 high, so neither the ULA nor Kempston sees them.
+- TERM loads at 8000h behind `10 CLEAR 32767: LOAD "" CODE` and
+  `20 RANDOMIZE USR 32768`; EDIT returns to BASIC with the call up, RUN 20
+  goes back. Keys come from the ROM's interrupt (LAST_K, FLAGS bit 5) with
+  FLAGS bit 3 set each loop so letters are not keywords. After EXTEND the
+  ROM decodes in E mode: a letter arrives as its E-mode token (`etab`).
+- `tests/term.test.ts` checks the committed TERM.tap matches its source;
+  after editing `programs/TERM.asm`, run `npm run term`.
+- With the speaker on, the call sound holds the line ~11 s before CONNECT
+  (as in A-Prompt), and Synchronet's terminal detection gives up meanwhile
+  (DUMB, 80 columns). ATM0 connects at once and is detected as ANSI 64x24.
+- Live checks: Vertrauen (ATDT 1) has its own WebSocket gateway, so it works
+  from `vite preview`; the others need `npm run build && npx wrangler dev`.
 
 ## Testing tips
 
