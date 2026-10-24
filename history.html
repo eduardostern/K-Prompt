@@ -49,6 +49,7 @@
         <div><b>Dec 1984</b>The scuffle at the Baron of Beef</div>
         <div><b>10 Jan 1985</b>Sinclair C5</div>
         <div><b>Jun 1985</b>Microdigital TK90X</div>
+        <div><b>Sep 1985</b>Spectrum 128 in Spain</div>
         <div><b>7 Apr 1986</b>Amstrad buys the Sinclair computers, £5 million</div>
         <div><b>1986</b>TK95</div>
         <div><b>2010</b>Chris Smith's book on the ULA; TBBlue starts in Brazil</div>
@@ -94,6 +95,16 @@
               shipped (the X-1), televised poker, and in 2014 a warning that
               thinking machines would make it "very difficult for us to
               survive". In 2010 he said he did not use computers.
+            </p>
+            <p>
+              The last Sinclair-designed Spectrum was the <b>128</b>, made for
+              the Spanish distributor Investrónica and shown in Spain in
+              September 1985, in Britain in February 1986. It added a second ROM
+              with a menu and a full-screen BASIC editor, eight 16K banks of RAM
+              paged in at C000h, and an AY-3-8912 sound chip with three voices
+              (128 BASIC plays it with PLAY). Amstrad's <b>+2</b> (1986) put the
+              same machine in a grey case with a proper keyboard and a cassette
+              recorder built in. K-Prompt runs both, menu, banks, AY and all.
             </p>
           </div>
           <aside class="callout">
@@ -410,7 +421,7 @@
           at the moments it does it, counted in the Z80's T-states.
         </p>
         <div class="chips">
-          <div class="chip-card"><b>The frame</b><span>Each frame is 69,888 T-states of Z80 time (59,736 on a TK at 60 Hz). For the first 32 the interrupt line is low, and the CPU takes it if it is listening, as on the real machine. Then the program runs until the frame is spent.</span></div>
+          <div class="chip-card"><b>The frame</b><span>Each frame is 69,888 T-states of Z80 time (59,736 on a TK at 60 Hz, 70,908 on a 128K). For the first 32 (36 on a 128K) the interrupt line is low, and the CPU takes it if it is listening, as on the real machine. Then the program runs until the frame is spent.</span></div>
           <div class="chip-card"><b>The picture</b><span>Each 8-pixel cell is read from memory at the T-state the beam reaches it, so a program that changes the screen mid-line is seen exactly where it acts. The bitmap's thirds and interleaved lines are decoded as the ULA fetches them.</span></div>
           <div class="chip-card"><b>The border</b><span>Every OUT to port FEh is kept with its T-state. Each border pixel takes the colour in force when the beam passed it, so loading stripes and border effects land where they did on a TV.</span></div>
           <div class="chip-card"><b>FLASH</b><span>Ink and paper swap every 16 frames, 0.64 s on a 48K.</span></div>

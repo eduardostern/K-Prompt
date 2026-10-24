@@ -475,3 +475,112 @@ describe('floating bus', () => {
     expect(zx.cpu.a).toBe(0x5a);
   });
 });
+
+describe('128K and +2', () => {
+  const out = (zx: Spectrum, v: number) => zx.cpu.portOut(0x7ffd, v);
+
+  it('boot to the menu under their banners', () => {
+    for (const m of ['128k', 'plus2'] as const) {
+      const text = screen(boot(m, 100));
+      expect(text).toContain('Tape Loader');
+      expect(text).toContain(MODELS[m].banner);
+    }
+  });
+
+  it('page a bank in at C000h, keep the others, and share banks 5 and 2 with their fixed places', () => {
+    const zx = boot('128k', 100);
+    out(zx, 1); zx.poke(0xc000, 0x11);
+    out(zx, 3); zx.poke(0xc000, 0x33);
+    expect(zx.cpu.contendedPage[3]).toBe(1); // odd banks are contended
+    out(zx, 1);
+    expect(zx.mem[0xc000]).toBe(0x11);
+    expect(zx.bank(3)[0]).toBe(0x33);
+    out(zx, 4);
+    expect(zx.cpu.contendedPage[3]).toBe(0);
+    out(zx, 5);
+    zx.poke(0xc010, 0x55);
+    expect(zx.mem[0x4010]).toBe(0x55);
+    zx.poke(0x4020, 0x66);
+    expect(zx.mem[0xc020]).toBe(0x66);
+    out(zx, 0x10); // ROM 1: 48 BASIC
+    expect(Array.from(zx.mem.subarray(0, 16))).toEqual(Array.from(rom('128k').subarray(0x4000, 0x4010)));
+    out(zx, 0x20 | 1); // lock
+    out(zx, 3);
+    expect(zx.mem[0xc000]).toBe(0x11);
+  });
+
+  it('shows bank 7 when bit 3 asks for it', () => {
+    const zx = boot('128k', 100);
+    // The 128 editor pages from BANKM (5B5Ch); programs keep it up to date.
+    const page = (v: number) => { zx.poke(0x5b5c, v); out(zx, v); };
+    out(zx, 7);
+    zx.bank(7).fill(0, 0, 0x1800);
+    zx.bank(7).fill(0x10, 0x1800, 0x1b00); // red paper
+    page(7 | 8);
+    zx.runFrame();
+    zx.runFrame();
+    expect(zx.ula.frame[BORDER_TOP * WIDTH + BORDER_X]).toBe(PALETTE[2]);
+    page(8); // bank 7 paged out: still shown
+    zx.runFrame();
+    expect(zx.ula.frame[BORDER_TOP * WIDTH + BORDER_X]).toBe(PALETTE[2]);
+  });
+
+  it('plays the AY: a tone at the pitch of its period, and reads its registers back', () => {
+    const zx = boot('128k', 100);
+    const ay = (r: number, v: number) => { zx.cpu.portOut(0xfffd, r); zx.cpu.portOut(0xbffd, v); };
+    ay(0, 252); ay(1, 0); ay(7, 0x3e); ay(8, 15);
+    zx.cpu.portOut(0xfffd, 8);
+    expect(zx.cpu.portIn(0xfffd)).toBe(15);
+    zx.takeAudio();
+    const s: number[] = [];
+    for (let f = 0; f < 50; f++) { zx.runFrame(); s.push(...zx.takeAudio()); }
+    const mean = s.reduce((a, b) => a + b, 0) / s.length;
+    let up = 0;
+    for (let i = 1; i < s.length; i++) if (s[i - 1] < mean && s[i] >= mean) up++;
+    const hz = up / (s.length / 44100);
+    expect(hz).toBeGreaterThan(1_773_450 / 16 / 252 * 0.98); // 439.8 Hz
+    expect(hz).toBeLessThan(1_773_450 / 16 / 252 * 1.02);
+  });
+
+  it('loads a tape from the Tape Loader, and PLAYs from 128 BASIC', () => {
+    const zx = new Spectrum(rom('128k'), '128k');
+    zx.tape = parseTap('t.tap', programTape('t', tokenize('10 PRINT "HELLO"\n20 PLAY "a"', true), 10));
+    zx.typeLoad();
+    let played = false;
+    for (let f = 0; f < 500; f++) { zx.runFrame(); if (zx.ay.regs[0] === 0xfc && zx.ay.regs[8]) played = true; }
+    expect(screen(zx)).toContain('HELLO');
+    expect(screen(zx)).toContain('0 OK, 20:1');
+    expect(played).toBe(true);
+  });
+
+  it('saves and loads .z80 and .sna 128K snapshots with every bank, the paging and the AY', () => {
+    for (const [save, name] of [[saveZ80, 'x.z80'], [saveSna, 'x.sna']] as const) {
+      for (const paged of [3, 5]) { // a .sna with bank 5 at C000h holds it twice
+        const zx = boot('128k', 100);
+        const was = zx.port7ffd;
+        for (let n = 0; n < 8; n++) { out(zx, n); zx.poke(0xfff0, 0xa0 + n); }
+        out(zx, paged);
+        zx.cpu.portOut(0xfffd, 9); zx.cpu.portOut(0xbffd, 12);
+        const snap = save(zx);
+        const other = new Spectrum(rom('128k'), '128k');
+        loadSnapshot(other, name, snap);
+        for (let n = 0; n < 8; n++) expect(Array.from(other.bank(n)), `${name} bank ${n}`).toEqual(Array.from(zx.bank(n)));
+        expect(other.port7ffd).toBe(paged);
+        expect(other.cpu.pc).toBe(zx.cpu.pc);
+        expect(other.cpu.sp).toBe(zx.cpu.sp);
+        if (name === 'x.z80') expect(other.ay.regs[9]).toBe(12);
+        // Back as it was, the menu carries on.
+        out(other, was);
+        for (let f = 0; f < 30; f++) other.runFrame();
+        expect(screen(other)).toContain('Tape Loader');
+      }
+    }
+  });
+
+  it('writes a read of a port 7FFDh decodes into it, as the real one does', () => {
+    const zx = boot('128k', 100);
+    zx.cpu.cycles = 100; // top border: the floating bus reads FFh
+    expect(zx.cpu.portIn(0x7ffd)).toBe(0xff);
+    expect(zx.port7ffd).toBe(0xff); // bank 7, ROM 1, screen 7, locked
+  });
+});

@@ -1,16 +1,19 @@
 /**
- * Snapshots: the whole 48K machine at one moment, as the emulators of the
+ * Snapshots: the whole machine at one moment, as the emulators of the
  * 1990s saved it.
  *
  * `.sna`: a 27-byte header (I, HL', DE', BC', AF', HL, DE, BC, IY, IX,
  * IFF2 in bit 2, R, AF, SP, IM, border) and the 48K of RAM; PC is on the
- * stack, so loading does a RETN.
+ * stack, so loading does a RETN. The 128K form follows with PC, port
+ * 7FFDh, a TR-DOS flag and the other banks (0, 1, 3, 4, 6, 7, less the one
+ * at C000h), and leaves PC off the stack.
  *
  * `.z80`: a 30-byte header (A, F, BC, HL, PC, SP, I, R, a flags byte with
  * R's bit 7, the border and "compressed", DE, the alternate set, IY, IX,
  * IFF1, IFF2, IM). PC = 0 means version 2 or 3: an extra header gives the
- * PC and the hardware, then the RAM as 16K pages (8 = 4000h, 4 = 8000h,
- * 5 = C000h on a 48K), each optionally compressed with ED ED count byte.
+ * PC, the hardware, port 7FFDh and the AY's registers, then the RAM as 16K
+ * pages (8 = 4000h, 4 = 8000h, 5 = C000h on a 48K; 3 + n = bank n on a
+ * 128K), each optionally compressed with ED ED count byte.
  */
 import type { Spectrum } from './machine';
 
@@ -18,15 +21,39 @@ export function isSnapshot(name: string): boolean {
   return /\.(z80|sna)$/i.test(name);
 }
 
+const w = (b: Uint8Array, i: number) => b[i] | (b[i + 1] << 8);
+
+/** Whether a snapshot is of a 48K or a 128K (null: not one K-Prompt reads). */
+export function snapshotKind(name: string, b: Uint8Array): '48k' | '128k' | null {
+  if (/\.sna$/i.test(name)) {
+    if (b.length === SNA_48) return '48k';
+    return b.length === SNA_128 || b.length === SNA_128 + 0x4000 ? '128k' : null;
+  }
+  if (b.length < 30) return null;
+  if (w(b, 6) !== 0) return '48k';
+  const extra = w(b, 30), hw = b[34];
+  if (extra === 23) return hw <= 1 ? '48k' : hw === 3 || hw === 4 ? '128k' : null;
+  if (hw <= 1 || hw === 3) return '48k';
+  return hw >= 4 && hw <= 6 || hw === 12 ? '128k' : null;
+}
+
+const SNA_48 = 27 + 49152;
+const SNA_128 = SNA_48 + 4 + 5 * 0x4000;
+
 export function loadSnapshot(zx: Spectrum, name: string, bytes: Uint8Array): void {
+  const kind = snapshotKind(name, bytes);
+  if (!kind) throw new Error('this snapshot is not of a 48K or a 128K');
+  if ((kind === '128k') !== zx.paged) {
+    throw new Error(kind === '128k' ? 'this snapshot needs a 128K' : 'this snapshot is of a 48K');
+  }
   if (/\.sna$/i.test(name)) loadSna(zx, bytes);
   else loadZ80(zx, bytes);
 }
 
-const w = (b: Uint8Array, i: number) => b[i] | (b[i + 1] << 8);
+/** The banks of a 128K .sna after the first 48K, in file order. */
+const snaBanks = (paged: number) => [0, 1, 3, 4, 6, 7].filter((n) => n !== paged);
 
 function loadSna(zx: Spectrum, b: Uint8Array): void {
-  if (b.length !== 27 + 49152) throw new Error('this .sna is not a 48K snapshot');
   const cpu = zx.cpu;
   zx.reset();
   cpu.i = b[0];
@@ -40,20 +67,38 @@ function loadSna(zx: Spectrum, b: Uint8Array): void {
   cpu.sp = w(b, 23);
   cpu.im = b[25] & 3;
   zx.setBorder(b[26]);
-  zx.mem.set(b.subarray(27), 0x4000);
-  // RETN: PC from the stack.
-  cpu.pc = zx.mem[cpu.sp] | (zx.mem[(cpu.sp + 1) & 0xffff] << 8);
-  cpu.sp = (cpu.sp + 2) & 0xffff;
+  if (b.length === SNA_48) {
+    zx.mem.set(b.subarray(27), 0x4000);
+    // RETN: PC from the stack.
+    cpu.pc = zx.mem[cpu.sp] | (zx.mem[(cpu.sp + 1) & 0xffff] << 8);
+    cpu.sp = (cpu.sp + 2) & 0xffff;
+    return;
+  }
+  const at = SNA_48;
+  const paging = b[at + 2];
+  const n = paging & 7;
+  // Banks 5 and 2 and the paged one, then the rest; with the paging after.
+  const banks = new Map<number, Uint8Array>([[5, b.subarray(27, 27 + 0x4000)], [2, b.subarray(27 + 0x4000, 27 + 0x8000)]]);
+  banks.set(n, b.subarray(27 + 0x8000, SNA_48));
+  let o = at + 4;
+  for (const k of snaBanks(n)) { banks.set(k, b.subarray(o, o + 0x4000)); o += 0x4000; }
+  for (const [k, data] of banks) zx.bank(k).set(data);
+  zx.setPaging(paging);
+  cpu.pc = w(b, at);
 }
 
 export function saveSna(zx: Spectrum): Uint8Array {
   const cpu = zx.cpu;
-  const out = new Uint8Array(27 + 49152);
-  // Push PC, as the format wants it on the stack.
-  const sp = (cpu.sp - 2) & 0xffff;
+  const paged = zx.paged;
+  const n = zx.port7ffd & 7;
+  const out = new Uint8Array(paged ? SNA_48 + 4 + snaBanks(n).length * 0x4000 : SNA_48);
+  // The 48K form pushes PC, as it wants it on the stack; the 128K's has its own place for it.
+  const sp = paged ? cpu.sp : (cpu.sp - 2) & 0xffff;
   const mem = zx.mem.slice();
-  mem[sp] = cpu.pc & 0xff;
-  mem[(sp + 1) & 0xffff] = cpu.pc >> 8;
+  if (!paged) {
+    mem[sp] = cpu.pc & 0xff;
+    mem[(sp + 1) & 0xffff] = cpu.pc >> 8;
+  }
   const put = (i: number, v: number) => { out[i] = v & 0xff; out[i + 1] = (v >> 8) & 0xff; };
   out[0] = cpu.i;
   put(1, (cpu.h2 << 8) | cpu.l2); put(3, (cpu.d2 << 8) | cpu.e2);
@@ -66,6 +111,13 @@ export function saveSna(zx: Spectrum): Uint8Array {
   out[25] = cpu.im;
   out[26] = zx.ula.border;
   out.set(mem.subarray(0x4000), 27);
+  if (paged) {
+    put(SNA_48, cpu.pc);
+    out[SNA_48 + 2] = zx.port7ffd;
+    out[SNA_48 + 3] = 0;
+    let o = SNA_48 + 4;
+    for (const k of snaBanks(n)) { out.set(zx.bank(k), o); o += 0x4000; }
+  }
   return out;
 }
 
@@ -95,6 +147,11 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
   let flags = b[12];
   if (flags === 0xff) flags = 1; // as the format notes say
   const mem = new Uint8Array(0x10000);
+  /** 128K banks read from the file, and the paging and AY state. */
+  const banks = new Map<number, Uint8Array>();
+  let paging = 0;
+  let ay: Uint8Array | null = null;
+  let aySel = 0;
   if (pc !== 0) {
     // Version 1: 48K only, compressed if bit 5, ending with 00 ED ED 00.
     if (flags & 0x20) {
@@ -106,25 +163,32 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
     const extra = w(b, 30);
     pc = w(b, 32);
     const hw = b[34];
-    const v2 = extra === 23;
-    const is48 = v2 ? hw <= 1 : hw <= 1 || hw === 3;
-    if (!is48) throw new Error('this snapshot is for a 128K or another machine; K-Prompt is a 48K');
+    const is128 = zx.paged;
+    paging = b[35];
+    if (b[37] & 4) { aySel = b[38]; ay = b.slice(39, 55); }
     let i = 32 + extra;
     const where: Record<number, number> = { 8: 0x4000, 4: 0x8000, 5: 0xc000 };
     while (i + 3 <= b.length) {
       const len = w(b, i), page = b[i + 2];
       i += 3;
-      const at = where[page];
       const size = len === 0xffff ? 0x4000 : len;
-      if (at !== undefined) {
-        if (len === 0xffff) mem.set(b.subarray(i, i + 0x4000), at);
-        else expand(b, i, i + len, mem, at, 0x4000);
-      }
+      const data = new Uint8Array(0x4000);
+      if (len === 0xffff) data.set(b.subarray(i, i + 0x4000));
+      else expand(b, i, i + len, data, 0, 0x4000);
+      if (is128 && page >= 3 && page <= 10) banks.set(page - 3, data);
+      else if (!is128 && where[page] !== undefined) mem.set(data, where[page]);
       i += size;
     }
   }
   zx.reset();
-  zx.mem.set(mem.subarray(0x4000), 0x4000);
+  if (zx.paged) {
+    for (const [k, data] of banks) zx.bank(k).set(data);
+    zx.setPaging(paging);
+    if (ay) {
+      for (let r = 0; r < 16; r++) { zx.ay.select(r); zx.ay.write(ay[r], 0); }
+      zx.ay.select(aySel);
+    }
+  } else zx.mem.set(mem.subarray(0x4000), 0x4000);
   cpu.a = b[0]; cpu.f = b[1];
   cpu.bc = w(b, 2); cpu.hl = w(b, 4); cpu.pc = pc; cpu.sp = w(b, 8);
   cpu.i = b[10];
@@ -139,7 +203,7 @@ function loadZ80(zx: Spectrum, b: Uint8Array): void {
   cpu.im = b[29] & 3;
 }
 
-/** A version 3 .z80 of the 48K machine, pages uncompressed. */
+/** A version 3 .z80 of the machine (48K or 128K), pages uncompressed. */
 export function saveZ80(zx: Spectrum): Uint8Array {
   const cpu = zx.cpu;
   const head = new Uint8Array(30 + 2 + 54);
@@ -152,13 +216,25 @@ export function saveZ80(zx: Spectrum): Uint8Array {
   head[21] = cpu.a2; head[22] = cpu.f2;
   put(23, cpu.iy); put(25, cpu.ix);
   head[27] = cpu.iff1; head[28] = cpu.iff2; head[29] = cpu.im;
-  put(30, 54); put(32, cpu.pc); head[34] = 0;
-  const out = new Uint8Array(head.length + 3 * (3 + 0x4000));
+  put(30, 54); put(32, cpu.pc);
+  const pages: [number, Uint8Array][] = [];
+  if (zx.paged) {
+    head[34] = zx.model === 'plus2' ? 12 : 4;
+    head[35] = zx.port7ffd;
+    head[37] = 4; // the AY's registers follow
+    head[38] = zx.ay.selectedRegister;
+    head.set(zx.ay.regs, 39);
+    for (let n = 0; n < 8; n++) pages.push([3 + n, zx.bank(n)]);
+  } else {
+    head[34] = 0;
+    for (const [page, at] of [[8, 0x4000], [4, 0x8000], [5, 0xc000]]) pages.push([page, zx.mem.subarray(at, at + 0x4000)]);
+  }
+  const out = new Uint8Array(head.length + pages.length * (3 + 0x4000));
   out.set(head);
   let o = head.length;
-  for (const [page, at] of [[8, 0x4000], [4, 0x8000], [5, 0xc000]]) {
+  for (const [page, data] of pages) {
     out[o] = 0xff; out[o + 1] = 0xff; out[o + 2] = page;
-    out.set(zx.mem.subarray(at, at + 0x4000), o + 3);
+    out.set(data, o + 3);
     o += 3 + 0x4000;
   }
   return out;

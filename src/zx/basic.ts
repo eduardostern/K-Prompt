@@ -39,6 +39,10 @@ const WORDS: [string, number][] = [
   ...Object.entries(ALIASES),
 ].sort((a, b) => b[0].length - a[0].length);
 
+/** 128 BASIC adds SPECTRUM (A3h) and PLAY (A4h), where the 48K has UDGs T and U. */
+const WORDS_128: [string, number][] = [...WORDS, ['SPECTRUM', 0xa3] as [string, number], ['PLAY', 0xa4] as [string, number]]
+  .sort((a, b) => b[0].length - a[0].length);
+
 /** A number in the ROM's 5-byte floating-point form (small integers have their own form). */
 export function fiveBytes(n: number): number[] {
   if (Number.isInteger(n) && Math.abs(n) <= 65535) {
@@ -64,8 +68,9 @@ export function fiveBytes(n: number): number[] {
 
 const isLetter = (c: string) => /[A-Za-z]/.test(c);
 
-/** Tokenizes one line's text (without its number). */
-export function tokenizeLine(text: string): number[] {
+/** Tokenizes one line's text (without its number); `basic128` adds 128 BASIC's keywords. */
+export function tokenizeLine(text: string, basic128 = false): number[] {
+  const words = basic128 ? WORDS_128 : WORDS;
   const out: number[] = [];
   let i = 0;
   let inRem = false;
@@ -84,7 +89,7 @@ export function tokenizeLine(text: string): number[] {
     const prev = text[i - 1] ?? ' ';
     if (!isLetter(prev) && !/[0-9$]/.test(prev) || !isLetter(c)) {
       const upper = text.slice(i, i + 9).toUpperCase();
-      const hit = WORDS.find(([w]) => {
+      const hit = words.find(([w]) => {
         if (!upper.startsWith(w)) return false;
         if (!isLetter(w[0])) return true;
         const next = text[i + w.length] ?? ' ';
@@ -128,14 +133,14 @@ function byteOf(c: string): number {
 }
 
 /** The program from a listing: one numbered line per text line; others are skipped. */
-export function tokenize(listing: string): Uint8Array {
+export function tokenize(listing: string, basic128 = false): Uint8Array {
   const lines = new Map<number, number[]>();
   for (const raw of listing.split(/\r?\n/)) {
     const m = /^\s*(\d+)\s?(.*)$/.exec(raw);
     if (!m) continue;
     const no = Number(m[1]);
     if (no < 1 || no > 9999) throw new Error(`line number ${no} is out of range (1-9999)`);
-    const body = tokenizeLine(m[2]);
+    const body = tokenizeLine(m[2], basic128);
     if (!body.length) { lines.delete(no); continue; }
     lines.set(no, body);
   }

@@ -98,7 +98,12 @@ export class Ula {
   private flashCount = 0;
   flashOn = false;
 
-  constructor(private readonly mem: Uint8Array, public timing: Timing) {
+  /** The screen memory the ULA reads: 16K, the bitmap first (4000h on a 48K; bank 5 or 7 on a 128K). */
+  screen: Uint8Array;
+
+  /** `mem` is the 64K address space (the screen at 4000h) or a 16K screen bank. */
+  constructor(mem: Uint8Array, public timing: Timing) {
+    this.screen = mem.length > 0x4000 ? mem.subarray(0x4000, 0x8000) : mem;
     this.nextT = this.cellEnd(0);
   }
 
@@ -196,15 +201,15 @@ export class Ula {
     const x = k - y * lineT;
     if (y >= 192 || x >= 128 || (x & 7) > 3) return 0xff;
     const col = (x >> 3) * 2 + ((x >> 1) & 1);
-    if (x & 1) return this.mem[0x5800 + (y >> 3) * 32 + col];
-    return this.mem[(0x4000 | ((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
+    if (x & 1) return this.screen[0x1800 + (y >> 3) * 32 + col];
+    return this.screen[(((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
   }
 
   private drawDisplay(y: number, col: number, o: number): void {
-    const mem = this.mem;
+    const mem = this.screen;
     const out = this.frame;
-    const attr = mem[0x5800 + (y >> 3) * 32 + col];
-    let bits = mem[(0x4000 | ((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
+    const attr = mem[0x1800 + (y >> 3) * 32 + col];
+    let bits = mem[(((y & 0xc0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + col];
     if (attr & 0x80 && this.flashOn) bits ^= 0xff;
     const bright = attr & 0x40 ? 8 : 0;
     const ink = PALETTE[(attr & 7) | bright];

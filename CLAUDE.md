@@ -1,7 +1,7 @@
 # K-Prompt — notes for Claude
 
-ZX Spectrum 48K emulator for the browser in TypeScript, with Microdigital's
-Brazilian clones (TK90X, TK95). Static site (Vite). Sibling of A-Prompt
+ZX Spectrum emulator for the browser in TypeScript: 48K, 128K and +2, and
+Microdigital's Brazilian clones (TK90X, TK95). Static site (Vite). Sibling of A-Prompt
 (`~/cpm`, CP/M) and Ok-Prompt (`~/Ok-Prompt`, MSX); the Z80 core started
 as Ok-Prompt's copy of A-Prompt's and is now timed access by access (only
 here). Named after the flashing K cursor.
@@ -35,11 +35,12 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/zx/machine.ts` | `Spectrum`: memory, ports, `runFrame()`, models, tape traps, typing queue, `screenText()` |
 | `src/zx/ula.ts` | Picture drawn cell by cell (8 pixels, 4 T) as the beam passes; border changes kept with their T-state; `contentionTable`, `floatingBus` |
 | `src/zx/beeper.ts` | EAR/MIC (and the tape while it plays) averaged per output sample |
+| `src/zx/ay.ts` | AY-3-8912 (Ok-Prompt's PSG): 128K ports FFFDh/BFFDh, or a 48K add-on (`ay48`); mixed in `takeAudio()` |
 | `src/zx/keyboard.ts` | 8×5 matrix, PC keys by character (`"` = SYMBOL SHIFT + P), `KeyInput` |
 | `src/zx/legend.ts` | What is printed on each key, for the on-screen keyboard |
 | `src/zx/tape.ts` | `.tap`/`.tzx` blocks: bytes for the LD-BYTES trap, pulses for real-time play |
 | `src/zx/basic.ts` | Listing → tokens (+ 0Eh and the 5-byte number after each number) → a .tap with autostart |
-| `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3, 48K) load and save |
+| `src/zx/snapshot.ts` | `.sna` and `.z80` (v1–v3), 48K and 128K, load and save; `snapshotKind` |
 | `src/main.ts` | Page wiring, frame loop, deck, shelf, keyboard, joystick, gamepad |
 | `src/ui/` | Audio, power switch, sound output, confirm dialog, IndexedDB store (from Ok-Prompt); call sound (from A-Prompt) |
 | `src/zx/modem.ts` | Hayes modem with telnet (Ok-Prompt's copy of A-Prompt's), on ports 01BFh/02BFh |
@@ -47,7 +48,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
 | `scripts/z80asm.ts`, `build-*.ts` | Assembler (from Ok-Prompt); `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
-| `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom` (see `src/roms/README.md`) |
+| `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong
 
@@ -71,6 +72,14 @@ core tests, every bus event with its T-state) runs in `npm test`.
   `kempstonAttached`) returns `ula.floatingBus(t)`, sampled 2 T after the
   core calls `portIn` (`busReadT`): bitmap, attribute, bitmap+1, attribute+1,
   then FFh ×4 in each 8 T of the display, from `busPhase` (48K 2, TK 3).
+- 128K/+2: 3.5469 MHz, 228 T × 311 lines (70,908), paper at 14,362, INT
+  36 T. `mem` stays the flat 64K the CPU sees: paging copies the C000h bank
+  in and out (`page()`), banks 5 and 2 at C000h are aliased on write
+  (`alias`), and `bank(n)` is the live view of any bank (snapshots, tests).
+  The ULA reads `ula.screen` (bank 5 or 7). Port 7FFDh decodes A15 = A1 = 0;
+  reading such a port also writes 7FFDh (FUSE's quirk). The 128 editor
+  rewrites 7FFDh from BANKM (5B5Ch). Tape traps fire only with ROM 1 (48
+  BASIC) paged; `typeLoad()` picks Tape Loader on the menu (ENTER).
 - The ULA answers every even port; keyboard half-row r is selected by a 0
   in address bit 8+r, and several rows AND together. Port 1Fh (A5 low) is
   Kempston. The core passes `A<<8|n` for `IN A,(n)` and BC for `IN r,(C)`.

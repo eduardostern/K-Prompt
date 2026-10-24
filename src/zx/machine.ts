@@ -1,12 +1,19 @@
 /**
- * A 48K ZX Spectrum, or one of Microdigital's Brazilian clones of it (the
- * TK90X and the TK95): a Z80 at 3.5 MHz, 16K of ROM, 48K of RAM and the
+ * A 48K ZX Spectrum, one of Microdigital's Brazilian clones of it (the
+ * TK90X and the TK95), or a 128K or +2: a Z80 at 3.5 MHz, ROM, RAM and the
  * ULA, which draws the screen from RAM, reads the keyboard, and drives the
  * beeper and the cassette.
  *
  *   0000h–3FFFh  ROM (writes are ignored)
  *   4000h–57FFh  screen bitmap, 5800h–5AFFh attributes
  *   5B00h–FFFFh  RAM
+ *
+ * The 128K and +2 have 8 RAM banks of 16K and two ROMs (0: the 128 editor,
+ * 1: 48 BASIC). Bank 5 is always at 4000h and bank 2 at 8000h; port 7FFDh
+ * (A15 and A1 low) picks the bank at C000h (bits 0–2), the screen the ULA
+ * shows (bit 3: bank 5 or 7), the ROM (bit 4), and bit 5 locks it all
+ * until reset. Odd banks are contended. The AY sound chip is at FFFDh
+ * (select, read) and BFFDh (write).
  *
  * I/O: every even port is the ULA (port FEh). OUT sets the border (bits
  * 0–2), MIC (bit 3) and EAR/beeper (bit 4); IN reads the keyboard half-rows
@@ -22,6 +29,7 @@
  * (I·256 + FFh).
  */
 import { Z80 } from '../z80';
+import { Ay } from './ay';
 import { Beeper } from './beeper';
 import { KEYS, Key, keysFor, Matrix, SS } from './keyboard';
 import { Modem } from './modem';
@@ -52,7 +60,13 @@ export const TK_CLOCK = 3_575_611;
 export const TIMING_TK60: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 262, displayStart: 8_760, intLength: 32, busPhase: 3 };
 export const TIMING_TK50: Timing = { clock: TK_CLOCK, lineT: 228, frameT: 228 * 312, displayStart: 14_688, intLength: 32, busPhase: 3 };
 
-export type Model = '48k' | 'tk90x' | 'tk95';
+/**
+ * The 128K and +2 (Ferranti's 7C ULA): 3.5469 MHz, 228 T × 311 lines, the
+ * interrupt held for 36 T-states, the first pixel at 14,362 (FUSE's).
+ */
+export const TIMING_128K: Timing = { clock: 3_546_900, lineT: 228, frameT: 70_908, displayStart: 14_362, intLength: 36, busPhase: 2 };
+
+export type Model = '48k' | 'tk90x' | 'tk95' | '128k' | 'plus2';
 
 /** Which ULA a TK has: Microdigital's at 60 or 50 Hz, or a Ferranti one (some export boards). */
 export type TkVideo = '60' | '50' | 'ferranti';
@@ -68,20 +82,25 @@ export interface ModelInfo {
   /** What the machine shows at power-on, for tests and for the history page. */
   banner: string;
   tk: boolean;
+  /** 128K memory (banks, two ROMs) and the AY. */
+  paged?: boolean;
 }
 
 export const MODELS: Record<Model, ModelInfo> = {
   '48k': { label: 'ZX Spectrum 48K', banner: '© 1982 Sinclair Research Ltd', tk: false },
   tk90x: { label: 'Microdigital TK90X', banner: 'TK90X - Color Computer', tk: true },
   tk95: { label: 'Microdigital TK95', banner: 'TK Color Computer', tk: true },
+  '128k': { label: 'ZX Spectrum 128K', banner: '© 1986 Sinclair Research Ltd', tk: false, paged: true },
+  plus2: { label: 'ZX Spectrum +2', banner: '©1986, ©1982 Amstrad Consumer', tk: false, paged: true },
 };
 
 /** The timing of a model, with a TK's choice of ULA. */
 export function timingOf(model: Model, tkVideo: TkVideo = '60'): Timing {
+  if (MODELS[model].paged) return TIMING_128K;
   return MODELS[model].tk ? TK_VIDEO[tkVideo].timing : TIMING_48K;
 }
 
-// ROM entry points (the same in the 48K, TK90X and TK95 ROMs).
+// ROM entry points (the same in the 48K, TK90X and TK95 ROMs, and the 128K's 48 BASIC ROM).
 const SA_BYTES = 0x04c2, SA_LD_RET = 0x053f, LD_BYTES = 0x0556;
 
 /**
@@ -100,6 +119,23 @@ export class Spectrum {
   readonly matrix = new Matrix();
   readonly ula: Ula;
   readonly beeper: Beeper;
+  /** The AY (128K and +2; on a 48K only with `ay48`). */
+  ay: Ay;
+  /** A 48K with an AY interface at the 128K's ports (as many add-ons offered). */
+  ay48 = false;
+  /** The ROMs, 16K each: one, or the 128K's editor and 48 BASIC. */
+  private roms: Uint8Array[] = [];
+  /** 128K RAM banks not currently at 4000h, 8000h or C000h (those live in `mem`). */
+  private readonly banks = Array.from({ length: 8 }, () => new Uint8Array(0x4000));
+  /** Port 7FFDh's last value, the bank at C000h and the ROM paged in. */
+  port7ffd = 0;
+  private bankC = 0;
+  private romSel = 0;
+  /**
+   * When bank 5 or 2 is also at C000h, the distance from there to its fixed
+   * place (8000h or 4000h), so a write to either copy reaches both.
+   */
+  private alias = 0;
   model: Model = '48k';
   /** The ULA of a TK model (ignored for the 48K). */
   tkVideo: TkVideo = '60';
@@ -141,18 +177,28 @@ export class Spectrum {
     this.tkVideo = tkVideo;
     this.ula = new Ula(this.mem, timingOf(model, tkVideo));
     this.beeper = new Beeper(CPU_CLOCK, sampleRate);
+    this.ay = new Ay(CPU_CLOCK, sampleRate);
     const cpu = this.cpu;
     cpu.read = (a) => this.mem[a];
-    cpu.write = (a, v) => { if (a >= 0x4000) this.mem[a] = v; };
+    cpu.write = (a, v) => {
+      if (a < 0x4000) return;
+      this.mem[a] = v;
+      if (this.alias) {
+        if (a >= 0xc000) this.mem[a - this.alias] = v;
+        else if (a >= 0xc000 - this.alias && a < 0x10000 - this.alias) this.mem[a + this.alias] = v;
+      }
+    };
     cpu.portIn = (p) => this.portIn(p);
     cpu.portOut = (p, v) => this.portOut(p, v);
     this.setRom(rom, model);
   }
 
-  /** Puts a ROM in and switches the machine's model (call reset() after). */
+  /** Puts a ROM in (16K, or 32K for a 128K's two) and switches the machine's model; resets. */
   setRom(rom: Uint8Array, model: Model): void {
-    if (rom.length !== 0x4000) throw new Error('a Spectrum ROM is 16K');
-    this.mem.set(rom, 0);
+    const want = MODELS[model].paged ? 0x8000 : 0x4000;
+    if (rom.length !== want) throw new Error(`the ${MODELS[model].label} ROM is ${want / 1024}K`);
+    this.roms = [];
+    for (let i = 0; i < rom.length; i += 0x4000) this.roms.push(rom.slice(i, i + 0x4000));
     this.model = model;
     this.applyTiming();
     this.reset();
@@ -168,9 +214,19 @@ export class Spectrum {
     return this.ula.timing;
   }
 
+  /** Whether this model has the 128K's memory, ROMs and AY. */
+  get paged(): boolean {
+    return Boolean(MODELS[this.model].paged);
+  }
+
+  private get ayOn(): boolean {
+    return this.paged || this.ay48;
+  }
+
   private applyTiming(): void {
     const t = timingOf(this.model, this.tkVideo);
     this.ula.timing = t;
+    if (this.ay.cpuClock !== t.clock) this.ay = new Ay(t.clock, this.ay.sampleRate);
     // The ULA contends 4000h-7FFFh.
     this.cpu.contention = contentionTable(t);
     this.cpu.contendedPage.set([0, 1, 0, 0]);
@@ -183,6 +239,12 @@ export class Spectrum {
   /** Power cycle: RAM is cleared (the ROM tests and clears it again anyway). */
   reset(): void {
     this.mem.fill(0, 0x4000);
+    for (const b of this.banks) b.fill(0);
+    this.port7ffd = this.bankC = this.romSel = this.alias = 0;
+    this.mem.set(this.roms[0], 0);
+    this.cpu.contendedPage.set([0, 1, 0, 0]);
+    this.ula.screen = this.mem.subarray(0x4000, 0x8000);
+    this.ay.reset();
     this.cpu.reset();
     this.cpu.cycles = 0;
     this.frames = 0;
@@ -198,7 +260,65 @@ export class Spectrum {
     this.lastOut = colour & 7;
   }
 
+  // ---- 128K memory ----------------------------------------------------------
+
+  /** Port 7FFDh: the bank at C000h, the screen, the ROM, and the lock. */
+  private page(v: number): void {
+    if (this.port7ffd & 0x20) return;
+    // The ULA draws what it has passed from the screen as it was.
+    this.ula.catchUp(this.cpu.cycles);
+    this.port7ffd = v & 0xff;
+    const bank = v & 7;
+    if (bank !== this.bankC) {
+      if (this.bankC !== 5 && this.bankC !== 2) this.banks[this.bankC].set(this.mem.subarray(0xc000));
+      this.bankC = bank;
+      if (bank === 5) this.mem.copyWithin(0xc000, 0x4000, 0x8000);
+      else if (bank === 2) this.mem.copyWithin(0xc000, 0x8000, 0xc000);
+      else this.mem.set(this.banks[bank], 0xc000);
+      this.alias = bank === 5 ? 0x8000 : bank === 2 ? 0x4000 : 0;
+      this.cpu.contendedPage[3] = bank & 1;
+    }
+    const rom = (v >> 4) & 1;
+    if (rom !== this.romSel) {
+      this.romSel = rom;
+      this.mem.set(this.roms[rom], 0);
+    }
+    this.ula.screen = this.bank(v & 8 ? 7 : 5);
+  }
+
+  /** RAM bank `n` as it is now (a view into `mem` when it is mapped). */
+  bank(n: number): Uint8Array {
+    if (n === 5) return this.mem.subarray(0x4000, 0x8000);
+    if (n === 2) return this.mem.subarray(0x8000, 0xc000);
+    if (n === this.bankC) return this.mem.subarray(0xc000);
+    return this.banks[n];
+  }
+
+  /** Writes port 7FFDh as a program would (snapshots); unlocks first. */
+  setPaging(v: number): void {
+    this.port7ffd = 0;
+    this.page(v);
+  }
+
+  /** Whether the ROM at 0000h is 48 BASIC (where the tape traps live). */
+  private get basicRom(): boolean {
+    return this.romSel === this.roms.length - 1;
+  }
+
+  /** Writes a byte as the CPU would (both copies of an aliased bank). */
+  poke(a: number, v: number): void {
+    this.cpu.write(a & 0xffff, v & 0xff);
+  }
+
   private portIn(port: number): number {
+    const v = this.readPort(port);
+    // On a 128K, reading a port that 7FFDh's decoding sees writes the byte
+    // on the bus there too (a quirk of the real machine, as FUSE has it).
+    if (this.paged && !(port & 0x8002)) this.page(v);
+    return v;
+  }
+
+  private readPort(port: number): number {
     if (!(port & 1)) {
       // Bit 6 is the EAR input: the tape while it plays; otherwise it follows
       // EAR output, as on issue 3 boards.
@@ -211,6 +331,7 @@ export class Spectrum {
     }
     if (port === MODEM_STATUS) return this.modem.status();
     if (port === MODEM_DATA) return this.modem.read();
+    if (this.ayOn && (port & 0xc002) === 0xc000) return this.ay.read();
     if (!(port & 0x20) && this.kempstonAttached) return this.kempston & 0x1f;
     return this.ula.floatingBus(this.busReadT(port));
   }
@@ -233,6 +354,11 @@ export class Spectrum {
   private portOut(port: number, v: number): void {
     if (port === MODEM_STATUS) return this.modem.control(v);
     if (port === MODEM_DATA) return this.modem.write(v);
+    if (this.paged && !(port & 0x8002)) this.page(v);
+    if (this.ayOn && (port & 0x8002) === 0x8000) {
+      if (port & 0x4000) this.ay.select(v);
+      else this.ay.write(v, this.cpu.cycles);
+    }
     if (port & 1) return;
     const t = this.cpu.cycles;
     if (this.tape?.playing) this.playTape(); // keep the speaker's events in order
@@ -249,13 +375,17 @@ export class Spectrum {
     const { frameT, intLength } = this.ula.timing;
     while (cpu.cycles < frameT) {
       if (cpu.cycles < intLength) cpu.interrupt(0xff);
-      if (this.tape && (cpu.pc === LD_BYTES || cpu.pc === SA_BYTES)) this.tapeTrap();
+      if (this.tape && (cpu.pc === LD_BYTES || cpu.pc === SA_BYTES) && this.basicRom) this.tapeTrap();
       cpu.step();
       this.ula.catchUp(cpu.cycles);
     }
     if (this.tape?.playing) this.playTape(this.frameBase + frameT);
     this.ula.endFrame();
     this.beeper.endFrame(frameT);
+    if (this.ayOn) {
+      this.ay.advanceTo(frameT);
+      this.ay.rebase(frameT);
+    }
     cpu.cycles -= frameT;
     this.frameBase += frameT;
     this.frames++;
@@ -319,7 +449,7 @@ export class Spectrum {
         parity ^= b;
         const addr = (cpu.ix + n) & 0xffff;
         if (verify) { if (this.mem[addr] !== b) { ok = false; break; } }
-        else if (addr >= 0x4000) this.mem[addr] = b;
+        else this.poke(addr, b);
       }
       // The checksum byte follows the data; a block of another length fails.
       ok = ok && n === want && data.length === want + 2 && (parity ^ data[data.length - 1]) === 0;
@@ -332,7 +462,14 @@ export class Spectrum {
 
   /** The sound made since the last call. */
   takeAudio(): Float32Array<ArrayBuffer> {
-    return this.beeper.take();
+    const out = this.beeper.take();
+    if (!this.ayOn) return out;
+    // Both render the same stretch of time; their counts can differ by a sample.
+    const ay = this.ay.take();
+    const last = ay.length ? ay[ay.length - 1] : 0;
+    // The AY's three channels at full volume make 0.6; the beeper is quieter beside it, as on a 128K.
+    for (let i = 0; i < out.length; i++) out[i] = out[i] * 0.5 + (i < ay.length ? ay[i] : last);
+    return out;
   }
 
   // ---- typing --------------------------------------------------------------
@@ -343,6 +480,19 @@ export class Spectrum {
    */
   pressKeys(...chords: Key[][]): void {
     this.typing.push(...chords);
+  }
+
+  /**
+   * Starts the tape in the deck from a fresh reset, as a person would: on a
+   * 48K or TK, LOAD "" (J, then SYMBOL SHIFT + P twice, ENTER) once the
+   * ROM's memory test is done; on a 128K or +2, ENTER on the boot menu's
+   * first item, Tape Loader.
+   */
+  typeLoad(): void {
+    const wait = this.paged ? 12 : 24; // chords of nothing, 6 frames each
+    for (let i = 0; i < wait; i++) this.pressKeys([]);
+    if (this.paged) this.pressKeys([KEYS.ENTER]);
+    else this.pressKeys([KEYS.J], [SS, KEYS.P], [SS, KEYS.P], [KEYS.ENTER]);
   }
 
   /** Types text letter by letter (in L mode; keywords are typed by their key in K mode). */
@@ -385,9 +535,12 @@ export class Spectrum {
     // CHARS holds the font address minus 256; it is 0 until the ROM sets it up.
     const chars = this.mem[0x5c36] | (this.mem[0x5c37] << 8);
     const font = chars ? (chars + 0x100) & 0xffff : 0x3d00;
+    // A font in ROM is 48 BASIC's, whichever ROM is paged in now.
+    const fontMem = font < 0x4000 ? this.roms[this.roms.length - 1] : this.mem;
+    const screen = this.ula.screen;
     const glyphs = new Map<string, string>();
     for (let c = 0; c < 96; c++) {
-      const g = this.mem.subarray(font + c * 8, font + c * 8 + 8);
+      const g = fontMem.subarray(font + c * 8, font + c * 8 + 8);
       const ch = c === 0x60 - 0x20 ? '£' : c === 0x7f - 0x20 ? '©' : String.fromCharCode(c + 0x20);
       glyphs.set(String(Array.from(g)), ch);
       glyphs.set(String(Array.from(g, (b) => b ^ 0xff)), ch);
@@ -399,7 +552,7 @@ export class Spectrum {
         const cell: number[] = [];
         for (let y = 0; y < 8; y++) {
           const py = row * 8 + y;
-          cell.push(this.mem[0x4000 | ((py & 0xc0) << 5) | ((py & 7) << 8) | ((py & 0x38) << 2) | col]);
+          cell.push(screen[((py & 0xc0) << 5) | ((py & 7) << 8) | ((py & 0x38) << 2) | col]);
         }
         line += glyphs.get(String(cell)) ?? '·';
       }

@@ -8,6 +8,8 @@ import { unzipSync } from 'fflate';
 import rom48Url from './roms/48k.rom?url';
 import romTk90xUrl from './roms/tk90x.rom?url';
 import romTk95Url from './roms/tk95.rom?url';
+import rom128Url from './roms/128k.rom?url';
+import romPlus2Url from './roms/plus2.rom?url';
 import termTapUrl from './programs/TERM.tap?url';
 import ulaTapUrl from './programs/ULA.tap?url';
 import { inPhoneBook } from './phonebook';
@@ -17,7 +19,7 @@ import { startCallSound } from './ui/modem-audio';
 import { CS, KeyInput, KEYS, SS, Key } from './zx/keyboard';
 import { layoutFor } from './zx/legend';
 import { Model, MODELS, Spectrum, TK_VIDEO, TkVideo } from './zx/machine';
-import { isSnapshot, loadSnapshot, saveZ80 } from './zx/snapshot';
+import { isSnapshot, loadSnapshot, saveZ80, snapshotKind } from './zx/snapshot';
 import { programTape, tokenize } from './zx/basic';
 import { blankTape, parseTape, Tape } from './zx/tape';
 import { HEIGHT, WIDTH } from './zx/ula';
@@ -53,11 +55,13 @@ interface Settings {
   autoPower: boolean;
   joystick: Joystick;
   keyboard: boolean;
+  /** An AY interface on a 48K or TK, at the 128K's ports. */
+  ay48: boolean;
 }
 
 const DEFAULTS: Settings = {
   model: '48k', tkVideo: '60', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
-  flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false,
+  flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false, ay48: false,
 };
 
 function loadSettings(): Settings {
@@ -86,7 +90,14 @@ async function bytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await (await fetch(url)).arrayBuffer());
 }
 
-const ROM_URLS: Record<Model, string> = { '48k': rom48Url, tk90x: romTk90xUrl, tk95: romTk95Url };
+const ROM_URLS: Record<Model, string> = {
+  '48k': rom48Url, tk90x: romTk90xUrl, tk95: romTk95Url, '128k': rom128Url, plus2: romPlus2Url,
+};
+
+/** The name on the case, for the badge. */
+const BADGES: Record<Model, string> = {
+  '48k': 'ZX Spectrum', tk90x: 'TK 90X', tk95: 'TK 95', '128k': 'ZX Spectrum 128', plus2: 'ZX Spectrum +2',
+};
 
 async function start(): Promise<void> {
   const roms = {} as Record<Model, Uint8Array>;
@@ -119,9 +130,10 @@ async function start(): Promise<void> {
   const tkVideoField = $('tk-video-field');
   const isPal = () => zx.timing.frameT > 60_000;
   const applyModel = () => {
-    badge.textContent = settings.model === '48k' ? 'ZX Spectrum' : settings.model === 'tk90x' ? 'TK 90X' : 'TK 95';
+    badge.textContent = BADGES[settings.model];
     document.body.classList.toggle('tk', MODELS[settings.model].tk);
     tkVideoField.hidden = !MODELS[settings.model].tk;
+    $('ay48-field').hidden = Boolean(MODELS[settings.model].paged); // the 128K has its own
     document.body.classList.toggle('pal', isPal());
   };
   applyModel();
@@ -145,18 +157,24 @@ async function start(): Promise<void> {
       model.value = settings.model;
       return;
     }
+    switchModel(next);
+  });
+  /** Puts another machine on the desk (its ROM, a reset). */
+  function switchModel(next: Model): void {
     settings.model = next;
+    model.value = next;
     save();
     zx.setRom(roms[next], next);
     applyModel();
     drawKeyboard();
-  });
+  }
 
   const flags: (keyof Settings)[] = ['smooth', 'scanlines', 'curve', 'flicker', 'humbar'];
   const applyLook = () => {
     for (const f of flags) document.body.classList.toggle(f, Boolean(settings[f]));
     sound.volume = settings.volume / 100;
     zx.fastLoad = settings.fastLoad;
+    zx.ay48 = settings.ay48;
   };
   const bindCheck = (id: string, key: keyof Settings) => {
     const box = $<HTMLInputElement>(id);
@@ -171,6 +189,7 @@ async function start(): Promise<void> {
   bindCheck('fast-load', 'fastLoad');
   bindCheck('turbo-tape', 'turboTape');
   bindCheck('auto-power', 'autoPower');
+  bindCheck('ay48', 'ay48');
   const volume = $<HTMLInputElement>('volume');
   volume.value = String(settings.volume);
   volume.addEventListener('input', () => { settings.volume = Number(volume.value); save(); applyLook(); });
@@ -372,13 +391,11 @@ async function start(): Promise<void> {
     showTape();
   };
 
-  /** Types LOAD "" (J, then SYMBOL SHIFT + P twice, ENTER) after a reset. */
+  /** Resets and starts the tape: LOAD "" on a 48K, the Tape Loader on a 128K. */
   const typeLoad = () => {
     zx.reset();
     zx.tape?.rewind();
-    // Let the ROM finish its memory test before typing.
-    for (let i = 0; i < 24; i++) zx.pressKeys([]);
-    zx.pressKeys([KEYS.J], [SS, KEYS.P], [SS, KEYS.P], [KEYS.ENTER]);
+    zx.typeLoad();
     if (!running) void powerOn();
   };
 
@@ -419,8 +436,12 @@ async function start(): Promise<void> {
         if (!inner) throw new Error('no .tap, .tzx, .z80 or .sna inside this .zip');
         file = { name: inner.split('/').pop()!, data: files[inner] };
       }
-      if (file.data.length > MAX_FILE) throw new Error('that file is too big for a 48K Spectrum');
+      if (file.data.length > MAX_FILE) throw new Error('that file is too big to be a Spectrum tape or snapshot');
       if (isSnapshot(file.name)) {
+        // A 128K snapshot needs a 128K (and a 48K one a 48K-like machine): switch if it must.
+        const kind = snapshotKind(file.name, file.data);
+        if (kind === '128k' && !zx.paged) switchModel(settings.model === 'plus2' ? 'plus2' : '128k');
+        else if (kind === '48k' && zx.paged) switchModel('48k');
         loadSnapshot(zx, file.name, file.data);
         if (!running) { await warmUp(wrap, isPal()); running = true; showPower(); }
       } else {
@@ -483,7 +504,7 @@ async function start(): Promise<void> {
   });
   $('paste-run').addEventListener('click', (e) => {
     try {
-      const program = tokenize(pasteText.value);
+      const program = tokenize(pasteText.value, zx.paged);
       // Autostart at the first line, as a tape saved with SAVE "name" LINE n.
       const tap = programTape('listing', program, (program[0] << 8) | program[1]);
       insertTape({ name: 'listing.tap', data: tap });
