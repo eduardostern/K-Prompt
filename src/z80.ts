@@ -1,12 +1,20 @@
-/*! Ok-Prompt — © 2026 Eduardo Stern <eduardostern@icloud.com> — MIT License. Z80 core from A-Prompt. */
+/*! K-Prompt — © 2026 Eduardo Stern <eduardostern@icloud.com> — MIT License. Z80 core from A-Prompt and Ok-Prompt. */
 /*
- * Z80 CPU core.
+ * Z80 CPU core, timed access by access.
  *
- * A complete, table-free interpreter covering the documented instruction set
- * plus the undocumented instructions used by real CP/M software (SLL, IXH/IXL,
- * DDCB/FDCB register copies, ED variants). T-states follow the Zilog timing
- * tables (taken/not-taken branches, block repeats); the host uses them for
- * the clock limit and the MHz display.
+ * An interpreter for the documented instruction set plus the undocumented
+ * parts real software relies on (SLL, IXH/IXL, DDCB register copies, ED
+ * variants, the flags' bits 3 and 5, MEMPTR and Q). Every machine cycle
+ * advances `cycles` when it happens: an opcode fetch takes 4 T-states, a
+ * memory read or write 3, and internal cycles are counted one by one
+ * against the address the CPU leaves on the bus, as on the real chip. That
+ * is what a Spectrum's ULA needs to delay ("contend") the CPU: before each
+ * of those cycles, `mc()` adds the wait states from `contention` when the
+ * address is in a contended page. I/O is timed the same way (`ioPre`,
+ * `ioPost`), with the ULA's ports contended by their own pattern.
+ *
+ * The timing of every access matches FUSE's core tests
+ * (tests/fuse.test.ts), and the instruction set passes zexdoc and zexall.
  */
 
 export const CF = 0x01; // carry
@@ -33,67 +41,12 @@ for (let i = 0; i < 256; i++) {
   PARITY[i] = p ? 0 : PF;
 }
 
-const SZP = new Uint8Array(256);
 const SZ = new Uint8Array(256);
+const SZP = new Uint8Array(256);
 for (let i = 0; i < 256; i++) {
   SZ[i] = (i & (SF | XF | YF)) | (i === 0 ? ZF : 0);
   SZP[i] = SZ[i] | PARITY[i];
 }
-
-// T-states for unprefixed opcodes. Conditional JR/DJNZ/CALL/RET hold the
-// not-taken value; TAKEN adds the difference when the branch is taken.
-const BASE = new Uint8Array([
-  4, 10, 7, 6, 4, 4, 7, 4, 4, 11, 7, 6, 4, 4, 7, 4,
-  8, 10, 7, 6, 4, 4, 7, 4, 12, 11, 7, 6, 4, 4, 7, 4,
-  7, 10, 16, 6, 4, 4, 7, 4, 7, 11, 16, 6, 4, 4, 7, 4,
-  7, 10, 13, 6, 11, 11, 10, 4, 7, 11, 13, 6, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  7, 7, 7, 7, 7, 7, 4, 7, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  4, 4, 4, 4, 4, 4, 7, 4, 4, 4, 4, 4, 4, 4, 7, 4,
-  5, 10, 10, 10, 10, 11, 7, 11, 5, 10, 10, 0, 10, 17, 7, 11,
-  5, 10, 10, 11, 10, 11, 7, 11, 5, 4, 10, 11, 10, 0, 7, 11,
-  5, 10, 10, 19, 10, 11, 7, 11, 5, 4, 10, 4, 10, 0, 7, 11,
-  5, 10, 10, 4, 10, 11, 7, 11, 5, 6, 10, 4, 10, 0, 7, 11,
-]);
-
-/** Extra T-states for a taken conditional branch, and the branch's length. */
-const TAKEN = new Uint8Array(256);
-const TAKEN_LEN = new Uint8Array(256);
-for (const op of [0x10, 0x20, 0x28, 0x30, 0x38]) { TAKEN[op] = 5; TAKEN_LEN[op] = 2; }
-for (let op = 0xc0; op <= 0xf8; op += 8) {
-  TAKEN[op] = 6; TAKEN_LEN[op] = 1; // RET cc
-  TAKEN[op + 4] = 7; TAKEN_LEN[op + 4] = 3; // CALL cc
-}
-
-/** Opcodes that address (HL); with a DD/FD prefix they become (IX+d)/(IY+d). */
-const HL_MEM = new Uint8Array(256);
-for (const op of [0x34, 0x35, 0x36, 0x46, 0x4e, 0x56, 0x5e, 0x66, 0x6e, 0x7e,
-  0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x77, 0x86, 0x8e, 0x96, 0x9e, 0xa6, 0xae, 0xb6, 0xbe]) {
-  HL_MEM[op] = 1;
-}
-
-function edCycles(op: number): number {
-  if (op >= 0x40 && op < 0x80) {
-    switch (op & 7) {
-      case 0: case 1: return 12; // IN r,(C) / OUT (C),r
-      case 2: return 15; // SBC/ADC HL,rr
-      case 3: return 20; // LD (nn),rr / LD rr,(nn)
-      case 5: return 14; // RETN / RETI
-      case 7: return op === 0x67 || op === 0x6f ? 18 : op === 0x77 || op === 0x7f ? 8 : 9;
-      default: return 8; // NEG, IM
-    }
-  }
-  if ((op & 0xe4) === 0xa0) return 16; // block transfer/compare/IO
-  return 8;
-}
-
-/** True for LDIR/CPIR/INIR/OTIR and their decrementing forms. */
-const isBlockRepeat = (op: number): boolean => (op & 0xf4) === 0xb0;
 
 export class Z80 {
   mem = new Uint8Array(65536);
@@ -103,7 +56,14 @@ export class Z80 {
   a2 = 0; f2 = 0; b2 = 0; c2 = 0; d2 = 0; e2 = 0; h2 = 0; l2 = 0;
   ix = 0; iy = 0; sp = 0; pc = 0; i = 0; r = 0;
   iff1 = 0; iff2 = 0; im = 0;
+  /** HALT is running: PC stays on it and it is fetched again every 4 T-states. */
   halted = false;
+  /** MEMPTR (WZ), the internal address register; bits 3 and 5 of BIT n,(HL) come from it. */
+  wz = 0;
+  /** Q: F when the last instruction set the flags, else 0 (SCF and CCF read it). */
+  q = 0;
+  private lastQ = 0;
+  private qset = false;
 
   /** T-state counter: the machine paces itself and its devices by it. */
   cycles = 0;
@@ -112,19 +72,26 @@ export class Z80 {
   private eiPending = false;
 
   /**
-   * Memory: a flat 64K (`mem`) by default. A machine with banked memory,
-   * like the MSX with its slots, replaces read and write; every access the
-   * core makes goes through them.
+   * Memory: a flat 64K (`mem`) by default. A machine with banked memory
+   * replaces read and write; every access the core makes goes through them.
+   * They take no time: the core counts the T-states itself.
    */
   read: (addr: number) => number = (addr) => this.mem[addr];
   write: (addr: number, value: number) => void = (addr, value) => { this.mem[addr] = value; };
 
-  private rd(addr: number): number { return this.read(addr & 0xffff); }
-  private wr(addr: number, value: number): void { this.write(addr & 0xffff, value & 0xff); }
-
   /** I/O port handlers; the default is an empty bus (FFh) and a sink. */
   portIn: (port: number) => number = () => 0xff;
   portOut: (port: number, value: number) => void = () => {};
+
+  /**
+   * Contention: the wait states at each T-state of the frame (indexed by
+   * `cycles`), or null for none. `contendedPage[addr >> 14]` is 1 for each
+   * 16K page the ULA delays.
+   */
+  contention: Uint8Array | null = null;
+  contendedPage = new Uint8Array(4);
+  /** Whether a port is the ULA's (it is contended whatever its address). */
+  ulaPort: (port: number) => boolean = (port) => !(port & 1);
 
   reset(): void {
     this.a = this.f = 0;
@@ -138,7 +105,10 @@ export class Z80 {
     this.iff1 = this.iff2 = 0;
     this.im = 0;
     this.halted = false;
+    this.wz = 0;
+    this.q = this.lastQ = 0;
     this.cycles = 0;
+    this.eiPending = false;
   }
 
   get af(): number { return (this.a << 8) | this.f; }
@@ -149,20 +119,91 @@ export class Z80 {
   set de(v: number) { this.d = (v >> 8) & 0xff; this.e = v & 0xff; }
   get hl(): number { return (this.h << 8) | this.l; }
   set hl(v: number) { this.h = (v >> 8) & 0xff; this.l = v & 0xff; }
+  private get ir(): number { return (this.i << 8) | this.r; }
 
-  private imm8(): number { return this.rd(this.pc++ & 0xffff); }
+  // ---- bus cycles -------------------------------------------------------
+
+  /** A machine cycle of `t` T-states with `addr` on the bus, delayed first if contended. */
+  protected mc(addr: number, t: number): void {
+    const c = this.contention;
+    if (c !== null && this.contendedPage[addr >> 14]) this.cycles += c[this.cycles] | 0;
+    this.cycles += t;
+  }
+
+  /** `n` internal T-states with `addr` left on the bus, each one contended on its own. */
+  private nm(addr: number, n: number): void {
+    addr &= 0xffff;
+    for (let k = 0; k < n; k++) this.mc(addr, 1);
+  }
+
+  /** The first T-state of an I/O cycle. */
+  protected ioPre(port: number): void {
+    const c = this.contention;
+    if (c !== null && this.contendedPage[port >> 14]) this.cycles += c[this.cycles] | 0;
+    this.cycles += 1;
+  }
+
+  /** The other three: the ULA's ports are contended once, others in a contended page each T-state. */
+  protected ioPost(port: number): void {
+    const c = this.contention;
+    if (this.ulaPort(port)) {
+      if (c !== null) this.cycles += c[this.cycles] | 0;
+      this.cycles += 3;
+    } else if (c !== null && this.contendedPage[port >> 14]) {
+      for (let k = 0; k < 3; k++) { this.cycles += c[this.cycles] | 0; this.cycles += 1; }
+    } else this.cycles += 3;
+  }
+
+  private inPort(port: number): number {
+    this.ioPre(port);
+    const v = this.portIn(port) & 0xff;
+    this.ioPost(port);
+    return v;
+  }
+
+  private outPort(port: number, v: number): void {
+    this.ioPre(port);
+    this.portOut(port, v & 0xff);
+    this.ioPost(port);
+  }
+
+  /** An opcode fetch (M1): 4 T-states, and R counts it. */
+  private fetch(): number {
+    const pc = this.pc;
+    this.mc(pc, 4);
+    const op = this.read(pc);
+    this.pc = (pc + 1) & 0xffff;
+    this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
+    return op;
+  }
+
+  private rd(addr: number): number {
+    addr &= 0xffff;
+    this.mc(addr, 3);
+    return this.read(addr);
+  }
+  private wr(addr: number, value: number): void {
+    addr &= 0xffff;
+    this.mc(addr, 3);
+    this.write(addr, value & 0xff);
+  }
+
+  private imm8(): number {
+    const v = this.rd(this.pc);
+    this.pc = (this.pc + 1) & 0xffff;
+    return v;
+  }
   private imm16(): number {
-    const lo = this.rd(this.pc & 0xffff);
-    const hi = this.rd((this.pc + 1) & 0xffff);
-    this.pc = (this.pc + 2) & 0xffff;
-    return lo | (hi << 8);
+    const lo = this.imm8();
+    return lo | (this.imm8() << 8);
   }
   private rd16(addr: number): number {
-    return this.rd(addr & 0xffff) | (this.rd((addr + 1) & 0xffff) << 8);
+    const lo = this.rd(addr);
+    return lo | (this.rd(addr + 1) << 8);
   }
   private wr16(addr: number, v: number): void {
-    this.wr(addr & 0xffff, v & 0xff);
-    this.wr((addr + 1) & 0xffff, (v >> 8) & 0xff);
+    this.wr(addr, v & 0xff);
+    this.wr(addr + 1, (v >> 8) & 0xff);
   }
   private push16(v: number): void {
     this.sp = (this.sp - 1) & 0xffff;
@@ -222,14 +263,24 @@ export class Z80 {
     else this.hl = v;
   }
 
-  /** Reads the signed displacement that follows a DD/FD opcode. */
+  /**
+   * (IX+d): reads d, then 5 internal T-states on its address while the
+   * CPU adds it. MEMPTR takes the result.
+   */
   private idxAddr(idx: number): number {
-    const raw = this.rd(this.pc++ & 0xffff);
-    const d = (raw << 24) >> 24;
-    return (this.getHL(idx) + d) & 0xffff;
+    const at = this.pc;
+    const d = (this.imm8() << 24) >> 24;
+    this.nm(at, 5);
+    return (this.wz = (this.getHL(idx) + d) & 0xffff);
   }
 
   // ---- flag helpers -----------------------------------------------------
+
+  /** The instruction sets the flags (Q takes F when it ends). */
+  private flags(f: number): void {
+    this.f = f;
+    this.qset = true;
+  }
 
   private add8(v: number, withCarry: boolean): number {
     const a = this.a;
@@ -240,7 +291,7 @@ export class Z80 {
     f |= (sum & 0x100) ? CF : 0;
     f |= ((a ^ v ^ r) & HF);
     f |= ((a ^ r) & (v ^ r) & 0x80) >> 5;
-    this.f = f;
+    this.flags(f);
     return r;
   }
 
@@ -255,61 +306,68 @@ export class Z80 {
     f |= ((a ^ v) & (a ^ r) & 0x80) >> 5;
     // CP puts the undocumented bits 3/5 of the operand in F, not the result.
     if (!store) f = (f & ~(XF | YF)) | (v & (XF | YF));
-    this.f = f;
+    this.flags(f);
     if (store) this.a = r;
     return r;
   }
 
-  private and8(v: number): void { this.a &= v; this.f = SZP[this.a] | HF; }
-  private xor8(v: number): void { this.a = (this.a ^ v) & 0xff; this.f = SZP[this.a]; }
-  private or8(v: number): void { this.a |= v; this.f = SZP[this.a]; }
+  private and8(v: number): void { this.a &= v; this.flags(SZP[this.a] | HF); }
+  private xor8(v: number): void { this.a = (this.a ^ v) & 0xff; this.flags(SZP[this.a]); }
+  private or8(v: number): void { this.a |= v; this.flags(SZP[this.a]); }
 
   private inc8(v: number): number {
     const r = (v + 1) & 0xff;
-    this.f = (this.f & CF) | (r & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
-      (r === 0x80 ? PF : 0) | ((v & 0x0f) === 0x0f ? HF : 0);
+    this.flags((this.f & CF) | (r & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
+      (r === 0x80 ? PF : 0) | ((v & 0x0f) === 0x0f ? HF : 0));
     return r;
   }
 
   private dec8(v: number): number {
     const r = (v - 1) & 0xff;
-    this.f = (this.f & CF) | NF | (r & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
-      (r === 0x7f ? PF : 0) | ((v & 0x0f) === 0 ? HF : 0);
+    this.flags((this.f & CF) | NF | (r & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
+      (r === 0x7f ? PF : 0) | ((v & 0x0f) === 0 ? HF : 0));
     return r;
   }
 
+  /** ADD HL,rr (or IX/IY): 7 internal T-states on IR. */
   private addHL(v: number, idx = 0): void {
+    this.nm(this.ir, 7);
     const a = this.getHL(idx);
+    this.wz = (a + 1) & 0xffff;
     const sum = a + v;
     const r = sum & 0xffff;
-    this.f = (this.f & (SF | ZF | PF)) |
+    this.flags((this.f & (SF | ZF | PF)) |
       (((a ^ v ^ r) >> 8) & HF) |
       ((r >> 8) & (XF | YF)) |
-      (sum > 0xffff ? CF : 0);
+      (sum > 0xffff ? CF : 0));
     this.setHL(idx, r);
   }
 
   private adcHL(v: number): void {
+    this.nm(this.ir, 7);
     const a = this.hl;
+    this.wz = (a + 1) & 0xffff;
     const carry = (this.f & CF) ? 1 : 0;
     const sum = a + v + carry;
     const r = sum & 0xffff;
     let f = ((r >> 8) & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
       (((a ^ v ^ r) >> 8) & HF) | (sum > 0xffff ? CF : 0);
     f |= ((a ^ r) & (v ^ r) & 0x8000) >> 13;
-    this.f = f;
+    this.flags(f);
     this.hl = r;
   }
 
   private sbcHL(v: number): void {
+    this.nm(this.ir, 7);
     const a = this.hl;
+    this.wz = (a + 1) & 0xffff;
     const carry = (this.f & CF) ? 1 : 0;
     const diff = a - v - carry;
     const r = diff & 0xffff;
     let f = NF | ((r >> 8) & (SF | XF | YF)) | (r === 0 ? ZF : 0) |
       (((a ^ v ^ r) >> 8) & HF) | (diff < 0 ? CF : 0);
     f |= ((a ^ v) & (a ^ r) & 0x8000) >> 13;
-    this.f = f;
+    this.flags(f);
     this.hl = r;
   }
 
@@ -336,130 +394,124 @@ export class Z80 {
     }
     if ((old & 0x0f) > 9 || (this.f & HF)) correction += 0x06;
     this.a = (old + ((this.f & NF) ? -correction : correction)) & 0xff;
-    this.f = SZP[this.a] | ((this.a ^ old) & HF) | (this.f & NF) | carry;
+    this.flags(SZP[this.a] | ((this.a ^ old) & HF) | (this.f & NF) | carry);
   }
 
-  private rlc(v: number): number {
-    const c = (v >> 7) & 1;
-    const r = ((v << 1) | c) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private rrc(v: number): number {
-    const c = v & 1;
-    const r = ((v >> 1) | (c << 7)) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private rl(v: number): number {
-    const c = (v >> 7) & 1;
-    const r = ((v << 1) | ((this.f & CF) ? 1 : 0)) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private rr(v: number): number {
-    const c = v & 1;
-    const r = ((v >> 1) | ((this.f & CF) ? 0x80 : 0)) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private sla(v: number): number {
-    const c = (v >> 7) & 1;
-    const r = (v << 1) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private sra(v: number): number {
-    const c = v & 1;
-    const r = ((v >> 1) | (v & 0x80)) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private sll(v: number): number {
-    const c = (v >> 7) & 1;
-    const r = ((v << 1) | 1) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
-  private srl(v: number): number {
-    const c = v & 1;
-    const r = (v >> 1) & 0xff;
-    this.f = SZP[r] | (c ? CF : 0);
-    return r;
-  }
   private rot(kind: number, v: number): number {
+    let r: number, c: number;
     switch (kind) {
-      case 0: return this.rlc(v);
-      case 1: return this.rrc(v);
-      case 2: return this.rl(v);
-      case 3: return this.rr(v);
-      case 4: return this.sla(v);
-      case 5: return this.sra(v);
-      case 6: return this.sll(v);
-      default: return this.srl(v);
+      case 0: c = v >> 7; r = (v << 1) | c; break; // RLC
+      case 1: c = v & 1; r = (v >> 1) | (c << 7); break; // RRC
+      case 2: c = v >> 7; r = (v << 1) | (this.f & CF); break; // RL
+      case 3: c = v & 1; r = (v >> 1) | ((this.f & CF) << 7); break; // RR
+      case 4: c = v >> 7; r = v << 1; break; // SLA
+      case 5: c = v & 1; r = (v >> 1) | (v & 0x80); break; // SRA
+      case 6: c = v >> 7; r = (v << 1) | 1; break; // SLL
+      default: c = v & 1; r = v >> 1; break; // SRL
     }
+    r &= 0xff;
+    this.flags(SZP[r] | (c ? CF : 0));
+    return r;
   }
 
+  /** BIT: bits 3 and 5 come from `f53` (the register, or MEMPTR's high byte for memory). */
   private bitTest(v: number, bit: number, f53: number): void {
     const set = v & (1 << bit);
-    this.f = (this.f & CF) | HF | (set ? 0 : ZF) | (set ? 0 : PF) |
-      (bit === 7 && set ? SF : 0) | (f53 & (XF | YF));
+    this.flags((this.f & CF) | HF | (set ? 0 : ZF | PF) |
+      (bit === 7 && set ? SF : 0) | (f53 & (XF | YF)));
+  }
+
+  /** RLCA, RRCA, RLA, RRA: S, Z and P are kept. */
+  private rotA(kind: number): void {
+    const a = this.a;
+    let r: number, c: number;
+    switch (kind) {
+      case 0: c = a >> 7; r = (a << 1) | c; break;
+      case 1: c = a & 1; r = (a >> 1) | (c << 7); break;
+      case 2: c = a >> 7; r = (a << 1) | (this.f & CF); break;
+      default: c = a & 1; r = (a >> 1) | ((this.f & CF) << 7); break;
+    }
+    this.a = r & 0xff;
+    this.flags((this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | c);
   }
 
   // ---- main loop --------------------------------------------------------
 
-  /** R counts opcode fetches: once per instruction and once per prefix byte. */
-  private bumpR(): void {
-    this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
-  }
-
   step(): void {
     // Interrupts are taken again only after the instruction that follows EI.
     this.eiPending = false;
-    if (this.halted) { this.bumpR(); this.cycles += 4; return; }
-    this.bumpR();
-    const start = this.pc & 0xffff;
-    const op = this.rd(start);
-    this.pc = (start + 1) & 0xffff;
-    this.execBase(op);
-    this.cycles += this.timing(op, start);
+    this.lastQ = this.q;
+    this.qset = false;
+    if (this.halted) {
+      // HALT is fetched again and again (as NOPs) until an interrupt.
+      this.mc(this.pc, 4);
+      this.read(this.pc);
+      this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
+      this.q = 0;
+      return;
+    }
+    this.execBase(this.fetch());
+    this.q = this.qset ? this.f : 0;
   }
 
-  /** T-states of the instruction that started at `start` and just ran. */
-  private timing(op: number, start: number): number {
-    if (op === 0xcb) {
-      const o = this.rd((start + 1) & 0xffff);
-      if ((o & 7) !== 6) return 8;
-      return (o & 0xc0) === 0x40 ? 12 : 15; // BIT b,(HL) : other (HL) ops
+  /** JR e, taken or not: the offset is read; a taken jump adds 5 T-states on its address. */
+  private jr(take: boolean): void {
+    const at = this.pc;
+    if (!take) {
+      // The offset's cycle runs, but nothing needs its value.
+      this.mc(at, 3);
+      this.pc = (at + 1) & 0xffff;
+      return;
     }
-    if (op === 0xed) {
-      const o = this.rd((start + 1) & 0xffff);
-      return edCycles(o) + (isBlockRepeat(o) && this.pc === start ? 5 : 0);
-    }
-    if (op === 0xdd || op === 0xfd) {
-      // Each extra DD/FD prefix costs 4 T-states and acts as a NOP.
-      let p = (start + 1) & 0xffff;
-      let t = 0;
-      while (this.rd(p) === 0xdd || this.rd(p) === 0xfd) { t += 4; p = (p + 1) & 0xffff; }
-      const o = this.rd(p);
-      if (o === 0xcb) return t + ((this.rd((p + 2) & 0xffff) & 0xc0) === 0x40 ? 20 : 23);
-      if (o === 0xed) {
-        const e = this.rd((p + 1) & 0xffff);
-        return t + 4 + edCycles(e) + (isBlockRepeat(e) && this.pc === p ? 5 : 0);
-      }
-      if (HL_MEM[o]) return t + (o === 0x36 ? 19 : BASE[o] + 12);
-      let base = t + 4 + BASE[o];
-      if (TAKEN[o] && this.pc !== ((p + TAKEN_LEN[o]) & 0xffff)) base += TAKEN[o];
-      return base;
-    }
-    let t = BASE[op];
-    if (TAKEN[op] && this.pc !== ((start + TAKEN_LEN[op]) & 0xffff)) t += TAKEN[op];
-    return t;
+    const d = (this.imm8() << 24) >> 24;
+    this.nm(at, 5);
+    this.pc = this.wz = (this.pc + d) & 0xffff;
+  }
+
+  private jp(take: boolean): void {
+    const a = this.wz = this.imm16();
+    if (take) this.pc = a;
+  }
+
+  private call(take: boolean): void {
+    const a = this.wz = this.imm16();
+    if (!take) return;
+    this.nm(this.pc - 1, 1);
+    this.push16(this.pc);
+    this.pc = a;
+  }
+
+  private ret(take: boolean): void {
+    this.nm(this.ir, 1);
+    if (take) this.pc = this.wz = this.pop16();
+  }
+
+  private rst(addr: number): void {
+    this.nm(this.ir, 1);
+    this.push16(this.pc);
+    this.pc = this.wz = addr;
+  }
+
+  private push(v: number): void {
+    this.nm(this.ir, 1);
+    this.push16(v);
+  }
+
+  /** EX (SP),HL/IX/IY: read 2, an internal T-state, write 2, then 2 more. */
+  private exSp(v: number): number {
+    const sp = this.sp;
+    const lo = this.rd(sp);
+    const hi = this.rd(sp + 1);
+    this.nm(sp + 1, 1);
+    this.wr(sp + 1, v >> 8);
+    this.wr(sp, v & 0xff);
+    this.nm(sp, 2);
+    return (this.wz = lo | (hi << 8));
   }
 
   private execBase(op: number): void {
     if (op >= 0x40 && op <= 0x7f) {
-      if (op === 0x76) { this.halted = true; return; }
+      if (op === 0x76) { this.halted = true; this.pc = (this.pc - 1) & 0xffff; return; }
       const dst = (op >> 3) & 7;
       const src = op & 7;
       if (src === 6) this.setR(dst, this.rd(this.hl));
@@ -476,199 +528,206 @@ export class Z80 {
     switch (op) {
       case 0x00: break; // NOP
       case 0x01: this.bc = this.imm16(); break;
-      case 0x02: this.wr(this.bc, this.a); break;
-      case 0x03: this.bc = (this.bc + 1) & 0xffff; break;
+      case 0x02: this.wr(this.bc, this.a); this.wz = ((this.bc + 1) & 0xff) | (this.a << 8); break;
+      case 0x03: this.nm(this.ir, 2); this.bc = (this.bc + 1) & 0xffff; break;
       case 0x04: this.b = this.inc8(this.b); break;
       case 0x05: this.b = this.dec8(this.b); break;
       case 0x06: this.b = this.imm8(); break;
-      case 0x07: { const c = (this.a >> 7) & 1; this.a = ((this.a << 1) | c) & 0xff; this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | (c ? CF : 0); break; }
+      case 0x07: this.rotA(0); break;
       case 0x08: { const a = this.a, f = this.f; this.a = this.a2; this.f = this.f2; this.a2 = a; this.f2 = f; break; }
       case 0x09: this.addHL(this.bc); break;
-      case 0x0a: this.a = this.rd(this.bc); break;
-      case 0x0b: this.bc = (this.bc - 1) & 0xffff; break;
+      case 0x0a: this.wz = (this.bc + 1) & 0xffff; this.a = this.rd(this.bc); break;
+      case 0x0b: this.nm(this.ir, 2); this.bc = (this.bc - 1) & 0xffff; break;
       case 0x0c: this.c = this.inc8(this.c); break;
       case 0x0d: this.c = this.dec8(this.c); break;
       case 0x0e: this.c = this.imm8(); break;
-      case 0x0f: { const c = this.a & 1; this.a = ((this.a >> 1) | (c << 7)) & 0xff; this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | (c ? CF : 0); break; }
-      case 0x10: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; this.b = (this.b - 1) & 0xff; if (this.b !== 0) this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x0f: this.rotA(1); break;
+      case 0x10: this.nm(this.ir, 1); this.b = (this.b - 1) & 0xff; this.jr(this.b !== 0); break;
       case 0x11: this.de = this.imm16(); break;
-      case 0x12: this.wr(this.de, this.a); break;
-      case 0x13: this.de = (this.de + 1) & 0xffff; break;
+      case 0x12: this.wr(this.de, this.a); this.wz = ((this.de + 1) & 0xff) | (this.a << 8); break;
+      case 0x13: this.nm(this.ir, 2); this.de = (this.de + 1) & 0xffff; break;
       case 0x14: this.d = this.inc8(this.d); break;
       case 0x15: this.d = this.dec8(this.d); break;
       case 0x16: this.d = this.imm8(); break;
-      case 0x17: { const c = (this.a >> 7) & 1; this.a = ((this.a << 1) | ((this.f & CF) ? 1 : 0)) & 0xff; this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | (c ? CF : 0); break; }
-      case 0x18: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x17: this.rotA(2); break;
+      case 0x18: this.jr(true); break;
       case 0x19: this.addHL(this.de); break;
-      case 0x1a: this.a = this.rd(this.de); break;
-      case 0x1b: this.de = (this.de - 1) & 0xffff; break;
+      case 0x1a: this.wz = (this.de + 1) & 0xffff; this.a = this.rd(this.de); break;
+      case 0x1b: this.nm(this.ir, 2); this.de = (this.de - 1) & 0xffff; break;
       case 0x1c: this.e = this.inc8(this.e); break;
       case 0x1d: this.e = this.dec8(this.e); break;
       case 0x1e: this.e = this.imm8(); break;
-      case 0x1f: { const c = this.a & 1; this.a = ((this.a >> 1) | ((this.f & CF) ? 0x80 : 0)) & 0xff; this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | (c ? CF : 0); break; }
-      case 0x20: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; if (!(this.f & ZF)) this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x1f: this.rotA(3); break;
+      case 0x20: this.jr(!(this.f & ZF)); break;
       case 0x21: this.hl = this.imm16(); break;
-      case 0x22: this.wr16(this.imm16(), this.hl); break;
-      case 0x23: this.hl = (this.hl + 1) & 0xffff; break;
+      case 0x22: { const a = this.imm16(); this.wr16(a, this.hl); this.wz = (a + 1) & 0xffff; break; }
+      case 0x23: this.nm(this.ir, 2); this.hl = (this.hl + 1) & 0xffff; break;
       case 0x24: this.h = this.inc8(this.h); break;
       case 0x25: this.h = this.dec8(this.h); break;
       case 0x26: this.h = this.imm8(); break;
       case 0x27: this.daa(); break;
-      case 0x28: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; if (this.f & ZF) this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x28: this.jr((this.f & ZF) !== 0); break;
       case 0x29: this.addHL(this.hl); break;
-      case 0x2a: this.hl = this.rd16(this.imm16()); break;
-      case 0x2b: this.hl = (this.hl - 1) & 0xffff; break;
+      case 0x2a: { const a = this.imm16(); this.hl = this.rd16(a); this.wz = (a + 1) & 0xffff; break; }
+      case 0x2b: this.nm(this.ir, 2); this.hl = (this.hl - 1) & 0xffff; break;
       case 0x2c: this.l = this.inc8(this.l); break;
       case 0x2d: this.l = this.dec8(this.l); break;
       case 0x2e: this.l = this.imm8(); break;
-      case 0x2f: this.a = (~this.a) & 0xff; this.f |= NF | HF; this.f = (this.f & ~(XF | YF)) | (this.a & (XF | YF)); break;
-      case 0x30: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; if (!(this.f & CF)) this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x2f: this.a = (~this.a) & 0xff; this.flags((this.f & (SF | ZF | PF | CF)) | NF | HF | (this.a & (XF | YF))); break;
+      case 0x30: this.jr(!(this.f & CF)); break;
       case 0x31: this.sp = this.imm16(); break;
-      case 0x32: this.wr(this.imm16(), this.a); break;
-      case 0x33: this.sp = (this.sp + 1) & 0xffff; break;
-      case 0x34: this.wr(this.hl, this.inc8(this.rd(this.hl))); break;
-      case 0x35: this.wr(this.hl, this.dec8(this.rd(this.hl))); break;
+      case 0x32: { const a = this.imm16(); this.wr(a, this.a); this.wz = ((a + 1) & 0xff) | (this.a << 8); break; }
+      case 0x33: this.nm(this.ir, 2); this.sp = (this.sp + 1) & 0xffff; break;
+      case 0x34: { const hl = this.hl; const v = this.inc8(this.rd(hl)); this.nm(hl, 1); this.wr(hl, v); break; }
+      case 0x35: { const hl = this.hl; const v = this.dec8(this.rd(hl)); this.nm(hl, 1); this.wr(hl, v); break; }
       case 0x36: this.wr(this.hl, this.imm8()); break;
-      case 0x37: this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | CF; break;
-      case 0x38: { const d = (this.rd(this.pc++ & 0xffff) << 24) >> 24; if (this.f & CF) this.pc = (this.pc + d) & 0xffff; break; }
+      case 0x37: // SCF: bits 3 and 5 from A, or kept from F if the last instruction set it
+        this.flags((this.f & (SF | ZF | PF)) | (((this.lastQ ^ this.f) | this.a) & (XF | YF)) | CF);
+        break;
+      case 0x38: this.jr((this.f & CF) !== 0); break;
       case 0x39: this.addHL(this.sp); break;
-      case 0x3a: this.a = this.rd(this.imm16()); break;
-      case 0x3b: this.sp = (this.sp - 1) & 0xffff; break;
+      case 0x3a: { const a = this.imm16(); this.a = this.rd(a); this.wz = (a + 1) & 0xffff; break; }
+      case 0x3b: this.nm(this.ir, 2); this.sp = (this.sp - 1) & 0xffff; break;
       case 0x3c: this.a = this.inc8(this.a); break;
       case 0x3d: this.a = this.dec8(this.a); break;
       case 0x3e: this.a = this.imm8(); break;
-      case 0x3f: this.f = (this.f & (SF | ZF | PF)) | (this.a & (XF | YF)) | ((this.f & CF) ? HF : CF); break;
+      case 0x3f: // CCF
+        this.flags((this.f & (SF | ZF | PF)) | ((this.f & CF) ? HF : CF) | (((this.lastQ ^ this.f) | this.a) & (XF | YF)));
+        break;
 
-      case 0xc0: if (!(this.f & ZF)) this.pc = this.pop16(); break;
+      case 0xc0: this.ret(!(this.f & ZF)); break;
       case 0xc1: this.bc = this.pop16(); break;
-      case 0xc2: { const a = this.imm16(); if (!(this.f & ZF)) this.pc = a; break; }
-      case 0xc3: this.pc = this.imm16(); break;
-      case 0xc4: { const a = this.imm16(); if (!(this.f & ZF)) { this.push16(this.pc); this.pc = a; } break; }
-      case 0xc5: this.push16(this.bc); break;
+      case 0xc2: this.jp(!(this.f & ZF)); break;
+      case 0xc3: this.jp(true); break;
+      case 0xc4: this.call(!(this.f & ZF)); break;
+      case 0xc5: this.push(this.bc); break;
       case 0xc6: this.a = this.add8(this.imm8(), false); break;
-      case 0xc7: this.push16(this.pc); this.pc = 0x00; break;
-      case 0xc8: if (this.f & ZF) this.pc = this.pop16(); break;
-      case 0xc9: this.pc = this.pop16(); break;
-      case 0xca: { const a = this.imm16(); if (this.f & ZF) this.pc = a; break; }
+      case 0xc7: this.rst(0x00); break;
+      case 0xc8: this.ret((this.f & ZF) !== 0); break;
+      case 0xc9: this.pc = this.wz = this.pop16(); break;
+      case 0xca: this.jp((this.f & ZF) !== 0); break;
       case 0xcb: this.execCb(); break;
-      case 0xcc: { const a = this.imm16(); if (this.f & ZF) { this.push16(this.pc); this.pc = a; } break; }
-      case 0xcd: { const a = this.imm16(); this.push16(this.pc); this.pc = a; break; }
+      case 0xcc: this.call((this.f & ZF) !== 0); break;
+      case 0xcd: this.call(true); break;
       case 0xce: this.a = this.add8(this.imm8(), true); break;
-      case 0xcf: this.push16(this.pc); this.pc = 0x08; break;
+      case 0xcf: this.rst(0x08); break;
 
-      case 0xd0: if (!(this.f & CF)) this.pc = this.pop16(); break;
+      case 0xd0: this.ret(!(this.f & CF)); break;
       case 0xd1: this.de = this.pop16(); break;
-      case 0xd2: { const a = this.imm16(); if (!(this.f & CF)) this.pc = a; break; }
-      case 0xd3: this.portOut((this.a << 8) | this.imm8(), this.a); break; // OUT (n),A
-      case 0xd4: { const a = this.imm16(); if (!(this.f & CF)) { this.push16(this.pc); this.pc = a; } break; }
-      case 0xd5: this.push16(this.de); break;
+      case 0xd2: this.jp(!(this.f & CF)); break;
+      case 0xd3: { // OUT (n),A
+        const n = this.imm8();
+        this.outPort((this.a << 8) | n, this.a);
+        this.wz = ((n + 1) & 0xff) | (this.a << 8);
+        break;
+      }
+      case 0xd4: this.call(!(this.f & CF)); break;
+      case 0xd5: this.push(this.de); break;
       case 0xd6: this.sub8(this.imm8(), false); break;
-      case 0xd7: this.push16(this.pc); this.pc = 0x10; break;
-      case 0xd8: if (this.f & CF) this.pc = this.pop16(); break;
+      case 0xd7: this.rst(0x10); break;
+      case 0xd8: this.ret((this.f & CF) !== 0); break;
       case 0xd9: { const b = this.b, c = this.c, d = this.d, e = this.e, h = this.h, l = this.l; this.b = this.b2; this.c = this.c2; this.d = this.d2; this.e = this.e2; this.h = this.h2; this.l = this.l2; this.b2 = b; this.c2 = c; this.d2 = d; this.e2 = e; this.h2 = h; this.l2 = l; break; }
-      case 0xda: { const a = this.imm16(); if (this.f & CF) this.pc = a; break; }
-      case 0xdb: this.a = this.portIn((this.a << 8) | this.imm8()) & 0xff; break; // IN A,(n)
-      case 0xdc: { const a = this.imm16(); if (this.f & CF) { this.push16(this.pc); this.pc = a; } break; }
+      case 0xda: this.jp((this.f & CF) !== 0); break;
+      case 0xdb: { // IN A,(n)
+        const port = (this.a << 8) | this.imm8();
+        this.wz = (port + 1) & 0xffff;
+        this.a = this.inPort(port);
+        break;
+      }
+      case 0xdc: this.call((this.f & CF) !== 0); break;
       case 0xdd: this.execIndexed(1); break;
       case 0xde: this.sub8(this.imm8(), true); break;
-      case 0xdf: this.push16(this.pc); this.pc = 0x18; break;
+      case 0xdf: this.rst(0x18); break;
 
-      case 0xe0: if (!(this.f & PF)) this.pc = this.pop16(); break;
+      case 0xe0: this.ret(!(this.f & PF)); break;
       case 0xe1: this.hl = this.pop16(); break;
-      case 0xe2: { const a = this.imm16(); if (!(this.f & PF)) this.pc = a; break; }
-      case 0xe3: { const lo = this.rd(this.sp), hi = this.rd((this.sp + 1) & 0xffff); this.wr(this.sp, this.hl & 0xff); this.wr((this.sp + 1) & 0xffff, (this.hl >> 8) & 0xff); this.hl = lo | (hi << 8); break; }
-      case 0xe4: { const a = this.imm16(); if (!(this.f & PF)) { this.push16(this.pc); this.pc = a; } break; }
-      case 0xe5: this.push16(this.hl); break;
+      case 0xe2: this.jp(!(this.f & PF)); break;
+      case 0xe3: this.hl = this.exSp(this.hl); break;
+      case 0xe4: this.call(!(this.f & PF)); break;
+      case 0xe5: this.push(this.hl); break;
       case 0xe6: this.and8(this.imm8()); break;
-      case 0xe7: this.push16(this.pc); this.pc = 0x20; break;
-      case 0xe8: if (this.f & PF) this.pc = this.pop16(); break;
+      case 0xe7: this.rst(0x20); break;
+      case 0xe8: this.ret((this.f & PF) !== 0); break;
       case 0xe9: this.pc = this.hl; break;
-      case 0xea: { const a = this.imm16(); if (this.f & PF) this.pc = a; break; }
+      case 0xea: this.jp((this.f & PF) !== 0); break;
       case 0xeb: { const d = this.d, e = this.e; this.d = this.h; this.e = this.l; this.h = d; this.l = e; break; }
-      case 0xec: { const a = this.imm16(); if (this.f & PF) { this.push16(this.pc); this.pc = a; } break; }
+      case 0xec: this.call((this.f & PF) !== 0); break;
       case 0xed: this.execEd(); break;
       case 0xee: this.xor8(this.imm8()); break;
-      case 0xef: this.push16(this.pc); this.pc = 0x28; break;
+      case 0xef: this.rst(0x28); break;
 
-      case 0xf0: if (!(this.f & SF)) this.pc = this.pop16(); break;
+      case 0xf0: this.ret(!(this.f & SF)); break;
       case 0xf1: this.af = this.pop16(); break;
-      case 0xf2: { const a = this.imm16(); if (!(this.f & SF)) this.pc = a; break; }
+      case 0xf2: this.jp(!(this.f & SF)); break;
       case 0xf3: this.iff1 = this.iff2 = 0; break;
-      case 0xf4: { const a = this.imm16(); if (!(this.f & SF)) { this.push16(this.pc); this.pc = a; } break; }
-      case 0xf5: this.push16(this.af); break;
+      case 0xf4: this.call(!(this.f & SF)); break;
+      case 0xf5: this.push(this.af); break;
       case 0xf6: this.or8(this.imm8()); break;
-      case 0xf7: this.push16(this.pc); this.pc = 0x30; break;
-      case 0xf8: if (this.f & SF) this.pc = this.pop16(); break;
-      case 0xf9: this.sp = this.hl; break;
-      case 0xfa: { const a = this.imm16(); if (this.f & SF) this.pc = a; break; }
+      case 0xf7: this.rst(0x30); break;
+      case 0xf8: this.ret((this.f & SF) !== 0); break;
+      case 0xf9: this.nm(this.ir, 2); this.sp = this.hl; break;
+      case 0xfa: this.jp((this.f & SF) !== 0); break;
       case 0xfb: this.iff1 = this.iff2 = 1; this.eiPending = true; break;
-      case 0xfc: { const a = this.imm16(); if (this.f & SF) { this.push16(this.pc); this.pc = a; } break; }
+      case 0xfc: this.call((this.f & SF) !== 0); break;
       case 0xfd: this.execIndexed(2); break;
       case 0xfe: this.sub8(this.imm8(), false, false); break;
-      case 0xff: this.push16(this.pc); this.pc = 0x38; break;
+      case 0xff: this.rst(0x38); break;
     }
   }
 
   private execCb(): void {
-    this.bumpR();
-    const op = this.rd(this.pc++ & 0xffff);
+    const op = this.fetch();
     const reg = op & 7;
     const group = op >> 6;
-    if (group === 0) {
-      const v = reg === 6 ? this.rd(this.hl) : this.getR(reg);
-      const r = this.rot((op >> 3) & 7, v);
-      if (reg === 6) this.wr(this.hl, r); else this.setR(reg, r);
-    } else if (group === 1) {
-      const bit = (op >> 3) & 7;
-      const v = reg === 6 ? this.rd(this.hl) : this.getR(reg);
-      this.bitTest(v, bit, reg === 6 ? (this.hl >> 8) : v);
-    } else if (group === 2) {
-      const bit = (op >> 3) & 7;
-      if (reg === 6) this.wr(this.hl, this.rd(this.hl) & (~(1 << bit)));
-      else this.setR(reg, this.getR(reg) & ~(1 << bit));
-    } else {
-      const bit = (op >> 3) & 7;
-      if (reg === 6) this.wr(this.hl, this.rd(this.hl) | ((1 << bit)));
-      else this.setR(reg, this.getR(reg) | (1 << bit));
+    const bit = (op >> 3) & 7;
+    if (reg !== 6) {
+      const v = this.getR(reg);
+      if (group === 0) this.setR(reg, this.rot(bit, v));
+      else if (group === 1) this.bitTest(v, bit, v);
+      else if (group === 2) this.setR(reg, v & ~(1 << bit));
+      else this.setR(reg, v | (1 << bit));
+      return;
     }
+    // (HL): read, an internal T-state, and write back (BIT only reads).
+    const hl = this.hl;
+    const v = this.rd(hl);
+    this.nm(hl, 1);
+    if (group === 1) { this.bitTest(v, bit, this.wz >> 8); return; }
+    const r = group === 0 ? this.rot(bit, v) : group === 2 ? v & ~(1 << bit) : v | (1 << bit);
+    this.wr(hl, r);
   }
 
   private execIndexed(idx: 1 | 2): void {
-    this.bumpR();
-    const op = this.rd(this.pc++ & 0xffff);
+    const op = this.fetch();
     if (op === 0xdd || op === 0xfd) { this.execIndexed(op === 0xdd ? 1 : 2); return; }
     if (op === 0xcb) {
-      const disp = (this.rd(this.pc++ & 0xffff) << 24) >> 24;
-      const cb = this.rd(this.pc++ & 0xffff);
-      const addr = (this.getHL(idx) + disp) & 0xffff;
+      // DD CB d op: d is read, then op (not an M1 fetch), then 2 internal T-states.
+      const d = (this.imm8() << 24) >> 24;
+      const at = this.pc;
+      const cb = this.rd(at);
+      this.pc = (at + 1) & 0xffff;
+      this.nm(at, 2);
+      const addr = this.wz = (this.getHL(idx) + d) & 0xffff;
       const reg = cb & 7;
       const group = cb >> 6;
-      if (group === 0) {
-        const r = this.rot((cb >> 3) & 7, this.rd(addr));
-        this.wr(addr, r);
-        if (reg !== 6) this.setR(reg, r, idx);
-      } else if (group === 1) {
-        this.bitTest(this.rd(addr), (cb >> 3) & 7, addr >> 8);
-      } else if (group === 2) {
-        this.wr(addr, this.rd(addr) & (~(1 << ((cb >> 3) & 7))));
-        if (reg !== 6) this.setR(reg, this.rd(addr), idx);
-      } else {
-        this.wr(addr, this.rd(addr) | (1 << ((cb >> 3) & 7)));
-        if (reg !== 6) this.setR(reg, this.rd(addr), idx);
-      }
+      const bit = (cb >> 3) & 7;
+      const v = this.rd(addr);
+      this.nm(addr, 1);
+      if (group === 1) { this.bitTest(v, bit, addr >> 8); return; }
+      const r = group === 0 ? this.rot(bit, v) : group === 2 ? v & ~(1 << bit) : v | (1 << bit);
+      this.wr(addr, r);
+      if (reg !== 6) this.setR(reg, r);
       return;
     }
-    if (op === 0x76) { this.halted = true; return; }
+    if (op === 0x76) { this.halted = true; this.pc = (this.pc - 1) & 0xffff; return; }
     if (op >= 0x40 && op <= 0x7f) {
       const dst = (op >> 3) & 7;
       const src = op & 7;
       if (dst === 6) {
         const addr = this.idxAddr(idx);
-        const v = src === 6 ? 0 : src === 4 ? this.h : src === 5 ? this.l : this.getR(src, idx);
-        this.wr(addr, v);
+        this.wr(addr, this.getR(src));
       } else if (src === 6) {
-        const v = this.rd(this.idxAddr(idx));
-        if (dst === 4) this.h = v; else if (dst === 5) this.l = v; else this.setR(dst, v, idx);
+        this.setR(dst, this.rd(this.idxAddr(idx)));
       } else {
         this.setR(dst, this.getR(src, idx), idx);
       }
@@ -686,48 +745,64 @@ export class Z80 {
       case 0x29: this.addHL(this.getHL(idx), idx); break;
       case 0x39: this.addHL(this.sp, idx); break;
       case 0x21: this.setHL(idx, this.imm16()); break;
-      case 0x22: this.wr16(this.imm16(), this.getHL(idx)); break;
-      case 0x2a: this.setHL(idx, this.rd16(this.imm16())); break;
-      case 0x23: this.setHL(idx, (this.getHL(idx) + 1) & 0xffff); break;
-      case 0x2b: this.setHL(idx, (this.getHL(idx) - 1) & 0xffff); break;
+      case 0x22: { const a = this.imm16(); this.wr16(a, this.getHL(idx)); this.wz = (a + 1) & 0xffff; break; }
+      case 0x2a: { const a = this.imm16(); this.setHL(idx, this.rd16(a)); this.wz = (a + 1) & 0xffff; break; }
+      case 0x23: this.nm(this.ir, 2); this.setHL(idx, this.getHL(idx) + 1); break;
+      case 0x2b: this.nm(this.ir, 2); this.setHL(idx, this.getHL(idx) - 1); break;
       case 0x24: this.setR(4, this.inc8(this.getR(4, idx)), idx); break;
       case 0x25: this.setR(4, this.dec8(this.getR(4, idx)), idx); break;
       case 0x26: this.setR(4, this.imm8(), idx); break;
       case 0x2c: this.setR(5, this.inc8(this.getR(5, idx)), idx); break;
       case 0x2d: this.setR(5, this.dec8(this.getR(5, idx)), idx); break;
       case 0x2e: this.setR(5, this.imm8(), idx); break;
-      case 0x34: { const a = this.idxAddr(idx); this.wr(a, this.inc8(this.rd(a))); break; }
-      case 0x35: { const a = this.idxAddr(idx); this.wr(a, this.dec8(this.rd(a))); break; }
-      case 0x36: { const a = this.idxAddr(idx); this.wr(a, this.imm8()); break; }
-      case 0xe1: this.setHL(idx, this.pop16()); break;
-      case 0xe5: this.push16(this.getHL(idx)); break;
-      case 0xe3: {
-        const lo = this.rd(this.sp), hi = this.rd((this.sp + 1) & 0xffff);
-        const v = this.getHL(idx);
-        this.wr(this.sp, v & 0xff);
-        this.wr((this.sp + 1) & 0xffff, (v >> 8) & 0xff);
-        this.setHL(idx, lo | (hi << 8));
+      case 0x34: case 0x35: {
+        const a = this.idxAddr(idx);
+        const v = this.rd(a);
+        const r = op === 0x34 ? this.inc8(v) : this.dec8(v);
+        this.nm(a, 1);
+        this.wr(a, r);
         break;
       }
+      case 0x36: {
+        // LD (IX+d),n: d and n are read, then 2 internal T-states on n's address.
+        const d = (this.imm8() << 24) >> 24;
+        const at = this.pc;
+        const n = this.imm8();
+        this.nm(at, 2);
+        this.wr(this.wz = (this.getHL(idx) + d) & 0xffff, n);
+        break;
+      }
+      case 0xe1: this.setHL(idx, this.pop16()); break;
+      case 0xe5: this.push(this.getHL(idx)); break;
+      case 0xe3: this.setHL(idx, this.exSp(this.getHL(idx))); break;
       case 0xe9: this.pc = this.getHL(idx); break;
-      case 0xf9: this.sp = this.getHL(idx); break;
+      case 0xf9: this.nm(this.ir, 2); this.sp = this.getHL(idx); break;
       default: this.execBase(op); break;
     }
   }
 
+  /** The flags after INI/IND/OUTI/OUTD and their repeats. */
+  private ioBlockFlags(v: number, k: number): void {
+    this.flags((v & 0x80 ? NF : 0) | (k > 0xff ? HF | CF : 0) | PARITY[(k & 7) ^ this.b] | SZ[this.b]);
+  }
+
   private execEd(): void {
-    this.bumpR();
-    const op = this.rd(this.pc++ & 0xffff);
+    const op = this.fetch();
     switch (op) {
       case 0x40: case 0x48: case 0x50: case 0x58: case 0x60: case 0x68: case 0x70: case 0x78: {
-        const v = this.portIn(this.bc) & 0xff;
-        this.f = (this.f & CF) | SZP[v];
+        const bc = this.bc;
+        this.wz = (bc + 1) & 0xffff;
+        const v = this.inPort(bc);
+        this.flags((this.f & CF) | SZP[v]);
         if (op !== 0x70) this.setR((op >> 3) & 7, v);
         break;
       }
-      case 0x41: case 0x49: case 0x51: case 0x59: case 0x61: case 0x69: case 0x71: case 0x79:
-        this.portOut(this.bc, op === 0x71 ? 0 : this.getR((op >> 3) & 7)); // OUT (C),r
+      case 0x41: case 0x49: case 0x51: case 0x59: case 0x61: case 0x69: case 0x71: case 0x79: {
+        const bc = this.bc;
+        this.outPort(bc, op === 0x71 ? 0 : this.getR((op >> 3) & 7)); // OUT (C),r
+        this.wz = (bc + 1) & 0xffff;
         break;
+      }
       case 0x42: this.sbcHL(this.bc); break;
       case 0x4a: this.adcHL(this.bc); break;
       case 0x52: this.sbcHL(this.de); break;
@@ -736,133 +811,120 @@ export class Z80 {
       case 0x6a: this.adcHL(this.hl); break;
       case 0x72: this.sbcHL(this.sp); break;
       case 0x7a: this.adcHL(this.sp); break;
-      case 0x43: this.wr16(this.imm16(), this.bc); break;
-      case 0x4b: this.bc = this.rd16(this.imm16()); break;
-      case 0x53: this.wr16(this.imm16(), this.de); break;
-      case 0x5b: this.de = this.rd16(this.imm16()); break;
-      case 0x63: this.wr16(this.imm16(), this.hl); break;
-      case 0x6b: this.hl = this.rd16(this.imm16()); break;
-      case 0x73: this.wr16(this.imm16(), this.sp); break;
-      case 0x7b: this.sp = this.rd16(this.imm16()); break;
+      case 0x43: case 0x53: case 0x63: case 0x73: {
+        const a = this.imm16();
+        const v = op === 0x43 ? this.bc : op === 0x53 ? this.de : op === 0x63 ? this.hl : this.sp;
+        this.wr16(a, v);
+        this.wz = (a + 1) & 0xffff;
+        break;
+      }
+      case 0x4b: case 0x5b: case 0x6b: case 0x7b: {
+        const a = this.imm16();
+        const v = this.rd16(a);
+        this.wz = (a + 1) & 0xffff;
+        if (op === 0x4b) this.bc = v; else if (op === 0x5b) this.de = v; else if (op === 0x6b) this.hl = v; else this.sp = v;
+        break;
+      }
       case 0x44: case 0x4c: case 0x54: case 0x5c: case 0x64: case 0x6c: case 0x74: case 0x7c: {
         const old = this.a;
         this.a = 0;
-        this.a = this.sub8(old, false);
+        this.sub8(old, false);
         break;
       }
-      case 0x45: case 0x55: case 0x65: case 0x75: this.pc = this.pop16(); this.iff1 = this.iff2; break;
-      case 0x4d: case 0x5d: case 0x6d: case 0x7d: this.pc = this.pop16(); this.iff1 = this.iff2; break;
+      case 0x45: case 0x55: case 0x65: case 0x75: case 0x4d: case 0x5d: case 0x6d: case 0x7d:
+        this.iff1 = this.iff2; // RETN / RETI
+        this.pc = this.wz = this.pop16();
+        break;
       case 0x46: case 0x4e: case 0x66: case 0x6e: this.im = 0; break;
       case 0x56: case 0x76: this.im = 1; break;
       case 0x5e: case 0x7e: this.im = 2; break;
-      case 0x47: this.i = this.a; break;
-      case 0x4f: this.r = this.a; break;
+      case 0x47: this.nm(this.ir, 1); this.i = this.a; break;
+      case 0x4f: this.nm(this.ir, 1); this.r = this.a; break;
       case 0x57: case 0x5f: {
+        this.nm(this.ir, 1);
         const v = op === 0x57 ? this.i : this.r;
         this.a = v;
-        this.f = (this.f & CF) | SZ[v] | (this.iff2 ? PF : 0);
+        this.flags((this.f & CF) | SZ[v] | (this.iff2 ? PF : 0));
         break;
       }
-      case 0x67: { // RRD
-        const v = this.rd(this.hl);
-        this.wr(this.hl, ((this.a << 4) & 0xf0) | (v >> 4));
-        this.a = (this.a & 0xf0) | (v & 0x0f);
-        this.f = (this.f & CF) | SZP[this.a];
+      case 0x67: case 0x6f: { // RRD / RLD
+        const hl = this.hl;
+        const v = this.rd(hl);
+        this.nm(hl, 4);
+        const m = op === 0x67 ? ((this.a << 4) & 0xf0) | (v >> 4) : ((v << 4) & 0xf0) | (this.a & 0x0f);
+        this.a = (this.a & 0xf0) | (op === 0x67 ? v & 0x0f : v >> 4);
+        this.wr(hl, m);
+        this.wz = (hl + 1) & 0xffff;
+        this.flags((this.f & CF) | SZP[this.a]);
         break;
       }
-      case 0x6f: { // RLD
+      case 0xa0: case 0xa8: case 0xb0: case 0xb8: { // LDI / LDD / LDIR / LDDR
         const v = this.rd(this.hl);
-        this.wr(this.hl, ((v << 4) & 0xf0) | (this.a & 0x0f));
-        this.a = (this.a & 0xf0) | ((v >> 4) & 0x0f);
-        this.f = (this.f & CF) | SZP[this.a];
-        break;
-      }
-      case 0xa0: case 0xa8: { // LDI / LDD
-        const v = this.rd(this.hl);
-        this.wr(this.de, v);
-        const step = op === 0xa0 ? 1 : -1;
+        const de = this.de;
+        this.wr(de, v);
+        this.nm(de, 2);
+        const step = op & 8 ? -1 : 1;
         this.hl = (this.hl + step) & 0xffff;
-        this.de = (this.de + step) & 0xffff;
+        this.de = (de + step) & 0xffff;
         this.bc = (this.bc - 1) & 0xffff;
-        const sum = this.a + v;
-        this.f = (this.f & (SF | ZF | CF)) | (this.bc ? PF : 0) |
-          (sum & XF) | ((sum & 0x02) ? YF : 0);
+        const n = this.a + v;
+        this.flags((this.f & (SF | ZF | CF)) | (this.bc ? PF : 0) | (n & XF) | ((n & 0x02) ? YF : 0));
+        if (op & 0x10 && this.bc !== 0) {
+          this.nm(de, 5);
+          this.pc = (this.pc - 2) & 0xffff;
+          this.wz = (this.pc + 1) & 0xffff;
+        }
         break;
       }
-      case 0xb0: case 0xb8: { // LDIR / LDDR
-        const v = this.rd(this.hl);
-        this.wr(this.de, v);
-        const step = op === 0xb0 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
-        this.de = (this.de + step) & 0xffff;
-        this.bc = (this.bc - 1) & 0xffff;
-        const sum = this.a + v;
-        this.f = (this.f & (SF | ZF | CF)) | (this.bc ? PF : 0) |
-          (sum & XF) | ((sum & 0x02) ? YF : 0);
-        if (this.bc !== 0) this.pc = (this.pc - 2) & 0xffff;
-        break;
-      }
-      case 0xa1: case 0xa9: { // CPI / CPD
-        const v = this.rd(this.hl);
+      case 0xa1: case 0xa9: case 0xb1: case 0xb9: { // CPI / CPD / CPIR / CPDR
+        const hl = this.hl;
+        const v = this.rd(hl);
+        this.nm(hl, 5);
         const r = (this.a - v) & 0xff;
         const half = (this.a ^ v ^ r) & HF;
-        const diff = this.a - v - (half ? 1 : 0);
-        const step = op === 0xa1 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
+        const n = r - (half ? 1 : 0);
+        const step = op & 8 ? -1 : 1;
+        this.hl = (hl + step) & 0xffff;
         this.bc = (this.bc - 1) & 0xffff;
-        this.f = (this.f & CF) | NF | half | (r & SF) | (r === 0 ? ZF : 0) | (this.bc ? PF : 0) |
-          (diff & XF) | ((diff & 0x02) ? YF : 0);
+        this.flags((this.f & CF) | NF | half | (r & SF) | (r === 0 ? ZF : 0) | (this.bc ? PF : 0) |
+          (n & XF) | ((n & 0x02) ? YF : 0));
+        if (op & 0x10 && this.bc !== 0 && r !== 0) {
+          this.nm(hl, 5);
+          this.pc = (this.pc - 2) & 0xffff;
+          this.wz = (this.pc + 1) & 0xffff;
+        } else this.wz = (this.wz + step) & 0xffff;
         break;
       }
-      case 0xb1: case 0xb9: { // CPIR / CPDR
+      case 0xa2: case 0xaa: case 0xb2: case 0xba: { // INI / IND / INIR / INDR
+        this.nm(this.ir, 1);
+        const bc = this.bc;
+        const v = this.inPort(bc);
+        const hl = this.hl;
+        this.wr(hl, v);
+        const step = op & 8 ? -1 : 1;
+        this.wz = (bc + step) & 0xffff;
+        this.b = (this.b - 1) & 0xff;
+        this.ioBlockFlags(v, v + ((this.c + step) & 0xff));
+        if (op & 0x10 && this.b !== 0) {
+          this.nm(hl, 5);
+          this.pc = (this.pc - 2) & 0xffff;
+        }
+        this.hl = (hl + step) & 0xffff;
+        break;
+      }
+      case 0xa3: case 0xab: case 0xb3: case 0xbb: { // OUTI / OUTD / OTIR / OTDR
+        this.nm(this.ir, 1);
         const v = this.rd(this.hl);
-        const r = (this.a - v) & 0xff;
-        const half = (this.a ^ v ^ r) & HF;
-        const diff = this.a - v - (half ? 1 : 0);
-        const step = op === 0xb1 ? 1 : -1;
+        this.b = (this.b - 1) & 0xff; // before the port is written
+        const step = op & 8 ? -1 : 1;
+        this.wz = (this.bc + step) & 0xffff;
+        this.outPort(this.bc, v);
         this.hl = (this.hl + step) & 0xffff;
-        this.bc = (this.bc - 1) & 0xffff;
-        this.f = (this.f & CF) | NF | half | (r & SF) | (r === 0 ? ZF : 0) | (this.bc ? PF : 0) |
-          (diff & XF) | ((diff & 0x02) ? YF : 0);
-        if (this.bc !== 0 && r !== 0) this.pc = (this.pc - 2) & 0xffff;
-        break;
-      }
-      case 0xa2: case 0xaa: { // INI / IND
-        const v = this.portIn(this.bc) & 0xff;
-        this.wr(this.hl, v);
-        const step = op === 0xa2 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
-        this.b = (this.b - 1) & 0xff;
-        this.f = (this.f & CF) | SZP[this.b] | NF | (v & 0x80 ? NF : 0);
-        break;
-      }
-      case 0xa3: case 0xab: { // OUTI / OUTD
-        const v = this.rd(this.hl);
-        this.portOut(((this.b - 1) & 0xff) << 8 | this.c, v);
-        const step = op === 0xa3 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
-        this.b = (this.b - 1) & 0xff;
-        this.f = (this.f & CF) | SZP[this.b] | NF | (v & 0x80 ? NF : 0);
-        break;
-      }
-      case 0xb2: case 0xba: { // INIR / INDR
-        const v = this.portIn(this.bc) & 0xff;
-        this.wr(this.hl, v);
-        const step = op === 0xb2 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
-        this.b = (this.b - 1) & 0xff;
-        this.f = (this.f & CF) | SZP[this.b] | NF;
-        if (this.b !== 0) this.pc = (this.pc - 2) & 0xffff;
-        break;
-      }
-      case 0xb3: case 0xbb: { // OTIR / OTDR
-        const v = this.rd(this.hl);
-        this.portOut(((this.b - 1) & 0xff) << 8 | this.c, v);
-        const step = op === 0xb3 ? 1 : -1;
-        this.hl = (this.hl + step) & 0xffff;
-        this.b = (this.b - 1) & 0xff;
-        this.f = (this.f & CF) | SZP[this.b] | NF;
-        if (this.b !== 0) this.pc = (this.pc - 2) & 0xffff;
+        this.ioBlockFlags(v, v + this.l);
+        if (op & 0x10 && this.b !== 0) {
+          this.nm(this.bc, 5);
+          this.pc = (this.pc - 2) & 0xffff;
+        }
         break;
       }
       default:
@@ -872,39 +934,39 @@ export class Z80 {
 
   /** Non-maskable interrupt. */
   nmi(): void {
-    this.iff2 = this.iff1;
+    if (this.halted) { this.pc = (this.pc + 1) & 0xffff; this.halted = false; }
     this.iff1 = 0;
-    this.halted = false;
-    this.bumpR();
+    this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
+    this.cycles += 5;
     this.push16(this.pc);
-    this.pc = 0x0066;
-    this.cycles += 11;
+    this.pc = this.wz = 0x0066;
+    this.q = 0;
   }
 
   /**
    * Maskable interrupt (mode 0/1/2). Returns false when it is not taken
-   * (interrupts disabled, or the instruction after EI has not run yet); the
-   * MSX's VDP holds its line until the status register is read, so the
-   * machine simply asks again after the next instruction.
+   * (interrupts disabled, or the instruction after EI has not run yet).
+   * The acknowledge cycle takes 7 T-states, then PC is pushed; IM 2 reads
+   * the vector at I·256 + data. In IM 0 the data byte is executed: the
+   * Spectrum's FFh is RST 38h.
    */
   interrupt(data = 0xff): boolean {
     if (!this.iff1 || this.eiPending) return false;
+    if (this.halted) { this.pc = (this.pc + 1) & 0xffff; this.halted = false; }
     this.iff1 = this.iff2 = 0;
-    this.halted = false;
-    this.bumpR();
-    this.cycles += this.im === 2 ? 19 : 13;
-    if (this.im === 0) {
-      // The data byte is executed as an instruction; an RST pushes PC itself.
-      this.execBase(data);
-    } else if (this.im === 1) {
-      this.push16(this.pc);
+    this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
+    this.cycles += 7;
+    this.push16(this.pc);
+    if (this.im === 2) {
+      const addr = (this.i << 8) | (data & 0xff);
+      this.pc = this.rd16(addr);
+    } else if (this.im === 1 || data === 0xff) {
       this.pc = 0x0038;
     } else {
-      // The vector is I:data as supplied; the Z80 does not clear bit 0.
-      this.push16(this.pc);
-      const addr = (this.i << 8) | (data & 0xff);
-      this.pc = this.rd(addr) | (this.rd((addr + 1) & 0xffff) << 8);
+      this.pc = data & 0x38; // RST n
     }
+    this.wz = this.pc;
+    this.q = 0;
     return true;
   }
 
