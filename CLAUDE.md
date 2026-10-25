@@ -53,6 +53,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `programs/io-ports.asm`, `io-if1.asm` | TERM's modem I/O (`minit`, `mpoll`, `send`, banner): K-Prompt's ports, or the IF1's RS232 at 19200 (I1TERM) |
 | `src/zx/z80asm.ts`, `src/zx/tape-file.ts`, `scripts/build-*.ts` | Assembler (from Ok-Prompt) and code tapes, used by the build scripts and the AI board; `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
+| `programs/ULA2.asm`, `scripts/build-ula2.ts`, `spectrum-image.ts` | A beach photo with the clash fixed down the middle (8×1 attributes, 16 columns × 192 lines); `beach.png` is CC0 |
 | `zx81.html`, `src/zx81main.ts` | The ZX80/ZX81 page: its own machine, tape and keys (the Spectrum page is `main.ts`) |
 | `src/zx81/machine.ts`, `keys.ts` | `Zx81`: ZX81, TK82C, TK85, ZX80, TK80; display by M1 fetches (`cpu.fetchOp`), INT from R bit 6, NMI generator, VSYNC on IN/OUT, LOAD/SAVE traps |
 | `src/roms/` | `zx80.rom`, `zx81.rom`, `tk85.rom` (10K: ZX81 8K + 2K at 2000h); `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
@@ -207,6 +208,21 @@ core tests, every bus event with its T-state) runs in `npm test`.
   above 8000h.
 - `tests/ula.test.ts` checks every band line's colours over 30 frames and
   that 600 frames each reach HALT before the next interrupt.
+
+## ULA2.tap (a photo, colour clash fixed)
+
+- `programs/beach.png` (CC0, credit in `beach.txt`) converted by
+  `scripts/spectrum-image.ts`: best colour pair per cell, Bayer dither.
+  The middle (columns 8-23, all 192 lines) gets 8×1 attributes, the sides
+  the ULA's 8×8; M swaps the middle (XORs its pixels, puts back 8×8).
+- 192 generated blocks of 224 T: POP 16 bytes into AF BC DE HL and the
+  alternate set, LD SP to the row's end, PUSH them. Blocks start 16 T into
+  the line before; the PUSH writes fall at +129…+217, after the ULA's
+  fetches (from −1 for 128 T) and before the next line's (+223). ENTRY_T
+  counts mloop's code after HALT (LD A,(clash); OR A; JP Z): 17 T too few
+  and every line showed the one before. Stack and IM 2 table at FD00h/FE00h.
+- `tests/ula2.test.ts` checks every pixel against the converted picture,
+  both ways, and SPACE back to BASIC (H'L' and IY restored).
 
 ## Testing tips
 

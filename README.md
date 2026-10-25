@@ -80,6 +80,15 @@ npm test           # vitest; ZEX=1 npx vitest run tests/zex.test.ts for the Z80 
 npm run build      # static site in dist/
 ```
 
+## ULA2: a photo without colour clash
+
+`ULA2.tap` on the shelf: a beach photograph (CC0, by Anders Wideskott, via
+Wikimedia Commons) on a 48K. The sides are as the ULA shows any picture,
+two colours per 8×8 cell; down the middle, 16 columns by all 192 lines,
+every pixel line has its own two colours, rewritten 192 times a frame while
+the beam is in the border. **M** swaps the middle between the two ways;
+SPACE goes back to BASIC.
+
 ## Fonts
 
 TERM's 4-pixel font is Tom Thumb (© 1999 Brian J. Swetland and Vassilii
