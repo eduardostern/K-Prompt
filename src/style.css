@@ -558,3 +558,25 @@ kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); bor
 .paste-error { color: var(--red) !important; }
 .paste-error:empty { display: none; }
 .field[hidden], .check[hidden] { display: none; }
+
+/* ---- the AI board's key ---------------------------------------------------- */
+.ai-key { display: flex; gap: 6px; margin: 8px 0 6px; }
+.ai-key input {
+  flex: 1;
+  min-width: 0;
+  font: 12px var(--mono);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #0f1015;
+  color: var(--text);
+}
+.ai-key input:focus { outline: none; border-color: var(--accent); }
+.ai-key .key-btn, .ai-actions .key-btn { padding: 4px 9px; font-size: 11px; }
+.ai-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ai-status { font: 11px var(--mono); color: var(--muted); }
+.ai-status.ok { color: var(--green); }
+.ai-howto { margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+.ai-howto summary { cursor: pointer; color: var(--text); }
+.ai-howto ol { margin: 6px 0 0; padding-left: 18px; line-height: 1.45; }
+.ai-howto a { color: var(--accent); }

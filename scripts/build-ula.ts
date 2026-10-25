@@ -22,8 +22,8 @@
  * contended memory.
  */
 import { readFileSync } from 'node:fs';
-import { assemble } from './z80asm';
-import { codeTape } from './tape-file';
+import { assemble } from '../src/zx/z80asm';
+import { codeTape } from '../src/zx/tape-file';
 
 export const ULA_ORG = 0x8000;
 

@@ -14,8 +14,8 @@
  * goes back.
  */
 import { readFileSync } from 'node:fs';
-import { assemble } from './z80asm';
-import { codeTape, codeTapeWith } from './tape-file';
+import { assemble } from '../src/zx/z80asm';
+import { codeTape, codeTapeWith } from '../src/zx/tape-file';
 import { tokenize } from '../src/zx/basic';
 
 export const TERM_ORG = 0x8000;

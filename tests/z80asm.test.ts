@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assemble, AsmError } from '../scripts/z80asm';
+import { assemble, AsmError } from '../src/zx/z80asm';
 import { Z80 } from '../src/z80';
 
 const hex = (src: string) => [...assemble(src).bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ');

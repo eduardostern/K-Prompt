@@ -35,6 +35,11 @@ floating bus.
   telnet modem, so BASIC can call a BBS with `OPEN #4;"b"`, and
   `I1TERM.tap` on the shelf is TERM through the Interface 1 at 19200 baud
   (`programs/io-if1.asm`, with its own bit-timed serial routines).
+- **AI board**: in TERM, `ATDT AI` calls a BBS whose sysop is DeepSeek
+  V4.1 Flash (your own API key, kept in your browser): chat with it or with
+  the Bastard Operator From Hell, or order a program in BASIC or Z80. It
+  tests the program on a hidden Spectrum, sends the ROM's error reports or
+  the assembler's errors back to the model, and leaves the tape in your deck.
 - **Quick save and rewind**: F2 keeps the machine in the browser and F3
   brings it back; F4 steps back about five seconds at a time, up to 30.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),

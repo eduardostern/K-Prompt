@@ -51,7 +51,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/phonebook.ts`, `worker/` | BBSes the relay may reach; the Worker's `/relay` WebSocket-to-telnet |
 | `programs/TERM.asm`, `font4.asm` | The 64-column terminal (Z80); Tom Thumb font, BSD licence |
 | `programs/io-ports.asm`, `io-if1.asm` | TERM's modem I/O (`minit`, `mpoll`, `send`, banner): K-Prompt's ports, or the IF1's RS232 at 19200 (I1TERM) |
-| `scripts/z80asm.ts`, `build-*.ts` | Assembler (from Ok-Prompt); `npm run tapes` builds `src/programs/*.tap` |
+| `src/zx/z80asm.ts`, `src/zx/tape-file.ts`, `scripts/build-*.ts` | Assembler (from Ok-Prompt) and code tapes, used by the build scripts and the AI board; `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
 | `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
 
@@ -155,6 +155,26 @@ core tests, every bus event with its T-state) runs in `npm test`.
   time it reports ANSI 64x24. Same code as A-Prompt and Ok-Prompt.
 - Live checks: Vertrauen (ATDT 1) has its own WebSocket gateway, so it works
   from `vite preview`; the others need `npm run build && npx wrangler dev`.
+
+## AI board
+
+- `ATDT AI` / `ATDT DEEPSEEK`: the dialer returns `createAiBoard`
+  (`src/ai/aiboard.ts`, A-Prompt's board brought over), a Link acting as a
+  telnet server in BINARY mode at 2400 baud, 62 columns for TERM/I1TERM.
+  The call sound plays first, as for any board.
+- DeepSeek is called from the browser (`src/ai/deepseek.ts`, CORS allows any
+  origin) with the visitor's own key, in localStorage `k-prompt.deepseek-key`,
+  set from the AI board panel or typed when the board asks. Never route it
+  through the Worker.
+- Programs: `[P]`, then BASIC or machine code. `src/ai/check.ts` tokenizes
+  BASIC onto a tape and runs it on a hidden 48K (~10 s): an error report
+  (ERR_NR not FFh/STOP/BREAK) goes back to the model; Z80 is assembled
+  (`src/zx/z80asm.ts`), put on a `codeTape` and run the same way (a reset to
+  the © screen is a crash). Three tries; the tape is delivered to the shelf
+  and deck (`deliver`), then "more changes" revises it in the same
+  conversation (`trimHistory`). No `[F]` upload: there is no ZMODEM.
+- Tests use a fake `chat` and `cps: 0` (`tests/aiboard.test.ts`); no test
+  calls DeepSeek.
 
 ## ULA.tap (multicolour)
 

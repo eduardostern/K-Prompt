@@ -2,7 +2,7 @@
  * Builds .tap files of the kind the ROM's SAVE wrote: a BASIC loader that
  * loads machine code and runs it, as the programs on the shelf come.
  */
-import { checksum } from '../src/zx/tape';
+import { checksum } from './tape';
 
 /** A number in a BASIC line: its digits, then 0Eh and the 5-byte integer form. */
 function num(n: number): number[] {

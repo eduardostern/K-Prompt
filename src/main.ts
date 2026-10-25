@@ -34,6 +34,9 @@ import { waitForPower, warmUp } from './ui/power';
 import { SoundOut } from './ui/sound-out';
 import { loadDeck, loadDrive, loadQuick, loadShelf, saveDeck, saveDrive, saveQuick, shelve, StoredFile, unshelve } from './ui/store';
 import { Rewind } from './zx/rewind';
+import { createAiBoard } from './ai/aiboard';
+import { checkBasic, checkZ80 } from './ai/check';
+import { streamChat } from './ai/deepseek';
 
 const SAMPLE_RATE = 44100;
 const MAX_FILE = 2 * 1024 * 1024;
@@ -580,6 +583,36 @@ async function start(): Promise<void> {
     }));
   };
 
+  // The AI board: its programs are checked on a hidden 48K and arrive as tapes.
+  aiBoard = (handlers) => createAiBoard(handlers, {
+    getKey: getDeepSeekKey,
+    setKey: setDeepSeekKey,
+    chat: streamChat,
+    check: (lang, name, source) => (lang === 'basic' ? checkBasic(roms['48k'], name, source) : checkZ80(roms['48k'], name, source)),
+    deliver: (name, tap) => {
+      const file = { name: `${name}.tap`, data: tap };
+      void shelve(file).then(showShelf);
+      insertTape(file);
+      notice(`${file.name} from the AI board is in the deck.`);
+    },
+    schedule: (fn, ms) => { window.setTimeout(fn, ms); },
+  });
+  const keyInput = $<HTMLInputElement>('deepseek-key');
+  $('deepseek-save').addEventListener('click', () => {
+    const key = keyInput.value.trim();
+    if (!key) return;
+    setDeepSeekKey(key);
+    keyInput.value = '';
+  });
+  $('deepseek-forget').addEventListener('click', () => { setDeepSeekKey(null); keyInput.value = ''; });
+  $('deepseek-show').addEventListener('click', (e) => {
+    const show = keyInput.type === 'password';
+    keyInput.type = show ? 'text' : 'password';
+    (e.currentTarget as HTMLButtonElement).textContent = show ? 'Hide' : 'Show';
+  });
+  keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('deepseek-save').click(); });
+  showKeyStatus();
+
   /** A tape or a snapshot, from a file, a drop, or the shelf. */
   const open = async (file: StoredFile, fromOutside = true) => {
     try {
@@ -838,7 +871,40 @@ function relayCall(host: string, port: number, handlers: LinkHandlers): Link {
  * from the visitor's IP; if that fails before the call is up and the board
  * is in the phone book, it goes through the relay instead.
  */
+// ---- DeepSeek key (AI board) ----------------------------------------------
+
+const DEEPSEEK_KEY = 'k-prompt.deepseek-key';
+
+function getDeepSeekKey(): string | null {
+  try {
+    return localStorage.getItem(DEEPSEEK_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setDeepSeekKey(key: string | null): void {
+  try {
+    if (key) localStorage.setItem(DEEPSEEK_KEY, key);
+    else localStorage.removeItem(DEEPSEEK_KEY);
+  } catch {
+    /* storage blocked: the key lasts for this call only */
+  }
+  showKeyStatus();
+}
+
+function showKeyStatus(): void {
+  const key = getDeepSeekKey();
+  const status = $('deepseek-status');
+  status.textContent = key ? `Key saved in this browser (${key.slice(0, 3)}…${key.slice(-4)}).` : 'No key yet.';
+  status.classList.toggle('ok', Boolean(key));
+}
+
+/** The AI board behind ATDT AI / ATDT DEEPSEEK, once the page has set it up. */
+let aiBoard: ((handlers: LinkHandlers) => Link) | null = null;
+
 const dialer: Dialer = (target, handlers) => {
+  if ((target.host === 'ai' || target.host === 'deepseek') && aiBoard) return aiBoard(handlers);
   if (!target.ws) return relayCall(target.host, target.port, handlers);
   let opened = false;
   let closed = false;
@@ -862,6 +928,7 @@ function setUpModem(zx: Spectrum): void {
     modem.speaker === 0 ? undefined : startCallSound(`${target.host}:${target.port}`, modem.volume));
   modem.terminalType = () => 'ANSI';
   modem.windowSize = () => [64, 24];
+  modem.services = [{ number: 'AI', name: 'AI board: DeepSeek V4.1 Flash, your API key' }];
   try {
     const saved = localStorage.getItem(MODEM_PROFILE);
     if (saved) modem.loadProfile(JSON.parse(saved));
