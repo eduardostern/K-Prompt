@@ -45,7 +45,9 @@ floating bus.
   V4.1 Flash (your own API key, kept in your browser): chat with it or with
   the Bastard Operator From Hell, or order a program in BASIC or Z80. It
   tests the program on a hidden Spectrum, sends the ROM's error reports or
-  the assembler's errors back to the model, and leaves the tape in your deck.
+  the assembler's errors back to the model, and sends you the tape by
+  ZMODEM: TERM saves it to the tape in your deck. To have your own BASIC
+  program fixed, SAVE it to tape and upload it from TERM (EXTEND, then U).
 - **Quick save and rewind**: F2 keeps the machine in the browser and F3
   brings it back; F4 steps back about five seconds at a time, up to 30.
 - **Keyboard**: the PC keyboard types by character (`"` is SYMBOL SHIFT + P),

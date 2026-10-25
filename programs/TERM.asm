@@ -14,7 +14,8 @@
 ; sends the cursor keys as ANSI. Keys:
 ;   EDIT (CAPS SHIFT + 1)    back to BASIC, the call stays up (RUN 20 returns)
 ;   BREAK (CAPS SHIFT + SPACE) sends ESC
-;   EXTEND (CAPS + SYMBOL SHIFT), then a letter: CTRL + that letter;
+;   EXTEND (CAPS + SYMBOL SHIFT), then a letter: CTRL + that letter
+;     (but EXTEND then U uploads the next file on the tape by ZMODEM);
 ;   then SYMBOL SHIFT + a key: the E-mode symbols [ ] { } \ | ~
 ;   DELETE (CAPS SHIFT + 0)  backspace
 ;
@@ -68,7 +69,9 @@ loop:   ld a, (quit)
         call hidecur
         pop af
         ld e, 0         ; at most 256 bytes before looking at the keys again
-rxloop: push de
+rxloop: call zwatch      ; the other end starting a ZMODEM download?
+        jr c, rxzm
+        push de
         call emit
         pop de
         dec e
@@ -78,6 +81,8 @@ rxloop: push de
         pop de
         jr c, rxloop
         jr loop
+rxzm:   call zrecv      ; the file goes to the tape, then back to the terminal
+        jp loop
 
 leave:  call hidecur
         call CLS
@@ -165,6 +170,8 @@ kfind:  cp (hl)
         ret
 kfound: ld a, 27
         sub b           ; A = 1 for A ... 26 for Z: the CTRL code
+        cp 'U' - 40h    ; EXTEND then U: upload the next file on the tape
+        jp z, zupload
         jp send
 
 ; The E-mode token on each letter key, A to Z.

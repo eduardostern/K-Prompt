@@ -116,4 +116,5 @@ banner: db "K-Prompt I1TERM: 64 columns on the Interface 1's RS232,", 13, 10
         db "19200 baud, to the telnet modem. ATI lists the boards,", 13, 10
         db "ATDT 1 dials the first. EDIT (CAPS SHIFT+1) goes back to", 13, 10
         db "BASIC with the call up; RUN 20 comes back. BREAK sends ESC,", 13, 10
-        db "EXTEND+letter is CTRL+letter.", 13, 10, 10, 0
+        db "EXTEND+letter is CTRL+letter. ZMODEM: downloads go to tape;", 13, 10
+        db "EXTEND+U uploads from tape.", 13, 10, 10, 0

@@ -40,4 +40,5 @@ swait:  in a, (c)
 banner: db "K-Prompt TERM: 64 columns on the telnet modem.", 13, 10
         db "Type AT commands: ATI lists the boards, ATDT 1 dials the first.", 13, 10
         db "EDIT (CAPS SHIFT+1) goes back to BASIC with the call up; RUN 20", 13, 10
-        db "comes back. BREAK sends ESC, EXTEND+letter is CTRL+letter.", 13, 10, 10, 0
+        db "comes back. BREAK sends ESC, EXTEND+letter is CTRL+letter.", 13, 10
+        db "ZMODEM: downloads go to tape; EXTEND+U uploads from tape.", 13, 10, 10, 0

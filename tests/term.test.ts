@@ -62,8 +62,8 @@ function run(zx: Spectrum, frames = 10) {
 
 /** TERM on K-Prompt's modem ports; I1TERM on the Interface 1's RS232, at 19200 baud. */
 const TERMS: { name: string; io: TermIo; build: () => Uint8Array; banner: string; below: number }[] = [
-  { name: 'TERM', io: 'ports', build: buildTermTap, banner: 'K-Prompt TERM: 64 columns on the telnet modem.', below: 5 },
-  { name: 'I1TERM', io: 'if1', build: buildI1termTap, banner: 'K-Prompt I1TERM: 64 columns on the Interface 1\'s RS232,', below: 6 },
+  { name: 'TERM', io: 'ports', build: buildTermTap, banner: 'K-Prompt TERM: 64 columns on the telnet modem.', below: 6 },
+  { name: 'I1TERM', io: 'if1', build: buildI1termTap, banner: 'K-Prompt I1TERM: 64 columns on the Interface 1\'s RS232,', below: 7 },
 ];
 
 for (const { name, io, build, banner, below } of TERMS) describe(name, () => {

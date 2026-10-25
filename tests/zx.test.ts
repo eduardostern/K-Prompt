@@ -753,3 +753,19 @@ describe('detokenize', () => {
     expect(detokenize(data.subarray(1, data.length - 1))).toBe('10 PRINT 7*6\n20 GO TO 10');
   });
 });
+
+describe('saving with the deck empty', () => {
+  it('puts a blank tape in first, as + Blank would', () => {
+    const zx = boot();
+    expect(zx.tape).toBeNull();
+    zx.typeText('10');
+    zx.pressKeys([KEYS.P]);
+    zx.typeText('1\n');
+    zx.pressKeys([KEYS.S]);
+    zx.typeText('"x"\n');
+    settle(zx, 30);
+    zx.pressKeys([KEYS.ENTER]);
+    settle(zx, 120);
+    expect(zx.tape!.labels()).toEqual(['Program: x']);
+  });
+});

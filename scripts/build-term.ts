@@ -42,9 +42,11 @@ export type TermIo = 'ports' | 'if1';
 /** The terminal's machine code, at TERM_ORG, with the modem I/O `io`. */
 export function assembleTerm(io: TermIo = 'ports'): Uint8Array {
   const file = (name: string) => readFileSync(new URL(name, root), 'utf8');
-  const source = [file('TERM.asm'), file(`io-${io}.asm`), cptab(), file('font4.asm')].join('\n');
+  const source = [file('TERM.asm'), file(`io-${io}.asm`), file('zmodem.asm'), cptab(), file('font4.asm')].join('\n');
   const { bytes, origin } = assemble(source);
   if (origin !== TERM_ORG) throw new Error('TERM must ORG at 8000h');
+  // ZMODEM's buffer starts at A000h.
+  if (TERM_ORG + bytes.length > 0xa000) throw new Error(`TERM runs into the ZMODEM buffer (${bytes.length} bytes)`);
   return bytes;
 }
 

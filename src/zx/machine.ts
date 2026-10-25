@@ -43,7 +43,7 @@ import { Rs232 } from './rs232';
 import { Beeper } from './beeper';
 import { KEYS, Key, keysFor, Matrix, SS } from './keyboard';
 import { Modem } from './modem';
-import { checksum, Tape } from './tape';
+import { blankTape, checksum, Tape } from './tape';
 import { contentionTable, Timing, Ula } from './ula';
 import { CF } from '../z80';
 
@@ -562,7 +562,7 @@ export class Spectrum {
     const { frameT, intLength } = this.ula.timing;
     while (cpu.cycles < frameT) {
       if (cpu.cycles < intLength && !(this.dec & 0x40)) cpu.interrupt(0xff);
-      if (this.tape && (cpu.pc === this.ldBytes || cpu.pc === this.saBytes) && this.basicRom) this.tapeTrap();
+      if ((this.tape ? cpu.pc === this.ldBytes || cpu.pc === this.saBytes : cpu.pc === this.saBytes) && this.basicRom) this.tapeTrap();
       const pc = cpu.pc;
       // The Interface 1's ROM comes in at the fetch from 0008h or 1708h, and leaves after the one at 0700h.
       if (this.if1 && (pc === 0x0008 || pc === 0x1708)) this.pageIf1(true);
@@ -611,7 +611,9 @@ export class Spectrum {
    */
   private tapeTrap(): void {
     const cpu = this.cpu;
-    const tape = this.tape!;
+    // Saving with the deck empty: a blank tape goes in first, as if "+ Blank" was pressed.
+    if (!this.tape) this.tape = blankTape();
+    const tape = this.tape;
     if (cpu.pc === this.saBytes) {
       const block = new Uint8Array(cpu.de + 2);
       block[0] = cpu.a;

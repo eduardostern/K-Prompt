@@ -191,11 +191,32 @@ core tests, every bus event with its T-state) runs in `npm test`.
   BASIC onto a tape and runs it on a hidden 48K (~10 s): an error report
   (ERR_NR not FFh/STOP/BREAK) goes back to the model; Z80 is assembled
   (`src/zx/z80asm.ts`), put on a `codeTape` and run the same way (a reset to
-  the © screen is a crash). Three tries; the tape is delivered to the shelf
-  and deck (`deliver`), then "more changes" revises it in the same
-  conversation (`trimHistory`). No `[F]` upload: there is no ZMODEM.
+  the © screen is a crash). Three tries; the tape goes down the line by
+  ZMODEM as a `.tap` (`src/ai/zmodem.ts`, A-Prompt's), or into the deck
+  (`deliver`) when the terminal has no ZMODEM; then "more changes" revises
+  it in the same conversation (`trimHistory`). `[F]` takes a BASIC `.tap`
+  uploaded by ZMODEM, `detokenize`s it (`src/zx/basic.ts`), runs it, and
+  fixes it with `FIX_PROMPT` through the same build loop.
 - Tests use a fake `chat` and `cps: 0` (`tests/aiboard.test.ts`); no test
   calls DeepSeek.
+
+## ZMODEM in TERM and I1TERM
+
+- `programs/zmodem.asm` (A-Prompt's ZMODEM.COM for the Z80, one file a
+  transfer, CRC-16, positions in 16 bits, timeouts in FRAMES) is assembled
+  into both terminals after their `io-*.asm`; it uses their `mpoll`/`send`
+  and TERM's `puts`/`emit`. Every transfer is a `.tap` image.
+- Download: `zwatch` sees `**` ZDLE `B00` (ZRQINIT) in the incoming bytes
+  and calls `zrecv`; the file goes to the buffer at A000h–FEFFh, then each
+  block is SAVEd through SA-BYTES (the emulator puts a blank tape in an
+  empty deck first). Upload: EXTEND then U (`kfound`) calls `zupload`:
+  LD-BYTES loads a header and its data into the buffer as a `.tap`, then
+  `zsend`. BREAK cancels. TERM must end below A000h (`build-term.ts` checks).
+- Header positions are 4 bytes: `zrxpos`/`ztxpos` are `dw 0, 0`. `zcrcup`
+  keeps A (the header senders print the byte after adding it to the CRC).
+- `tests/zmodem-term.test.ts` runs TERM and I1TERM against the real board
+  (fake model): a download onto the tape, and an upload that comes back
+  fixed. The board ignores input for 1.5 s after a transfer; tests wait.
 
 ## ULA.tap (multicolour)
 
