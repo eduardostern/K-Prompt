@@ -77,6 +77,12 @@ export class Z80 {
    * They take no time: the core counts the T-states itself.
    */
   read: (addr: number) => number = (addr) => this.mem[addr];
+  /**
+   * Opcode fetches (M1), when a machine sees them differently from data
+   * reads: the ZX80/ZX81 display circuit puts a NOP on the bus while the
+   * CPU runs through the display file. Null: fetches use `read`.
+   */
+  fetchOp: ((addr: number) => number) | null = null;
   write: (addr: number, value: number) => void = (addr, value) => { this.mem[addr] = value; };
 
   /** I/O port handlers; the default is an empty bus (FFh) and a sink. */
@@ -171,7 +177,7 @@ export class Z80 {
   private fetch(): number {
     const pc = this.pc;
     this.mc(pc, 4);
-    const op = this.read(pc);
+    const op = this.fetchOp ? this.fetchOp(pc) : this.read(pc);
     this.pc = (pc + 1) & 0xffff;
     this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
     return op;
@@ -445,7 +451,8 @@ export class Z80 {
     if (this.halted) {
       // HALT is fetched again and again (as NOPs) until an interrupt.
       this.mc(this.pc, 4);
-      this.read(this.pc);
+      if (this.fetchOp) this.fetchOp(this.pc);
+      else this.read(this.pc);
       this.r = (this.r & 0x80) | ((this.r + 1) & 0x7f);
       this.q = 0;
       return;

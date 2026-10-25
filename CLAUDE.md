@@ -53,7 +53,9 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `programs/io-ports.asm`, `io-if1.asm` | TERM's modem I/O (`minit`, `mpoll`, `send`, banner): K-Prompt's ports, or the IF1's RS232 at 19200 (I1TERM) |
 | `src/zx/z80asm.ts`, `src/zx/tape-file.ts`, `scripts/build-*.ts` | Assembler (from Ok-Prompt) and code tapes, used by the build scripts and the AI board; `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
-| `src/roms/` | `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
+| `zx81.html`, `src/zx81main.ts` | The ZX80/ZX81 page: its own machine, tape and keys (the Spectrum page is `main.ts`) |
+| `src/zx81/machine.ts`, `keys.ts` | `Zx81`: ZX81, TK82C, TK85, ZX80, TK80; display by M1 fetches (`cpu.fetchOp`), INT from R bit 6, NMI generator, VSYNC on IN/OUT, LOAD/SAVE traps |
+| `src/roms/` | `zx80.rom`, `zx81.rom`, `tk85.rom` (10K: ZX81 8K + 2K at 2000h); `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong
 
@@ -130,6 +132,25 @@ core tests, every bus event with its T-state) runs in `npm test`.
   frames). The 48K ROM's RAM test takes about 1.5 s before the © message.
 - `screenText()` matches screen cells against the font at CHARS+256; CHARS
   is 0 until the ROM sets it, then 3C00h.
+
+## ZX80 and ZX81 facts that are easy to get wrong
+
+- No video chip worth the name: D_FILE is executed at its address + 8000h;
+  an M1 fetch with A15 set and bit 6 clear is a character: the ULA latches
+  it, puts NOP on the bus, and shifts out the ROM pattern at I·256 +
+  code·8 + line counter (8 pixels in 4 T). Only opcode fetches see RAM
+  above 7FFFh; data reads there get FFh (the TK85's ROM tests RAM up to
+  FEFFh and would otherwise find a mirror).
+- /INT is A6 during refresh: asserted when R's bit 6 goes low. Taking it
+  restarts the 207-T line. The ZX81's NMI generator (OUT FEh on, OUT FDh
+  off) fires every 207 T; the ZX80 has none. IN with A0 = 0 starts VSYNC
+  (ZX81: only with NMIs off), any OUT ends it; a long one ends the frame.
+- 60 Hz machines (port FE bit 6 = 0, the TKs) leave BASIC less time
+  (~0.55 MHz against ~0.9): they take about 400 frames to reach the K
+  cursor. Typed keys need about 6 frames released between them.
+- Traps: ZX81 LOAD 0347h and SAVE 02FCh return through 0207h; ZX80 LOAD
+  0206h and SAVE 01B6h pop 2 and go to 0283h. `.p` loads at 4009h, `.o` at
+  4000h. The TK82C is a ZX81 clone; the ZX80 clones are the TK80 and TK82.
 
 ## The modem and TERM
 

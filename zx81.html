@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>K-Prompt · ZX81 and ZX80 in your browser</title>
+    <meta name="description" content="The Sinclair ZX81 and ZX80, and Microdigital's Brazilian TK85, TK82C and TK80, in the browser: the CPU draws the picture, as on the real machines." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  </head>
+  <body class="scanlines curve zx81-page">
+    <div class="room">
+      <header class="top">
+        <h1 class="brand"><span class="k">K</span>-Prompt <span class="zx81-tag">ZX81</span></h1>
+        <p class="tag">The ZX81, the ZX80 and their Brazilian clones. <a href="./">ZX Spectrum →</a></p>
+      </header>
+
+      <main class="stage">
+        <aside class="panel" aria-label="Machine">
+          <h2>Machine</h2>
+          <div class="btn-row">
+            <button id="power" class="key-btn power-btn" type="button" aria-pressed="false">⏻ Power</button>
+            <button id="reset" class="key-btn" type="button">↻ Reset</button>
+          </div>
+          <label class="field">Model
+            <select id="model">
+              <option value="zx81">Sinclair ZX81 (1981)</option>
+              <option value="tk85">Microdigital TK85 (1983)</option>
+              <option value="tk82c">Microdigital TK82C (1981)</option>
+              <option value="zx80">Sinclair ZX80 (1980)</option>
+              <option value="tk80">Microdigital TK80 (1981)</option>
+            </select>
+          </label>
+          <label class="field">Memory
+            <select id="ram">
+              <option value="1">1K</option>
+              <option value="2">2K</option>
+              <option value="16">16K (RAM pack)</option>
+            </select>
+          </label>
+          <p class="note" id="model-note"></p>
+          <dl class="readout">
+            <dt>Frames</dt><dd id="fps">–</dd>
+          </dl>
+        </aside>
+
+        <section class="center">
+          <div class="monitor">
+            <div class="screen-wrap" id="screen-wrap">
+              <canvas id="screen" width="320" height="240" aria-label="ZX81 screen"></canvas>
+              <div class="crt-roll" aria-hidden="true"></div>
+              <div class="drop-hint" aria-hidden="true">Drop a .p or .o program to put it on the tape</div>
+            </div>
+            <div class="bezel-foot">
+              <span class="badge" id="badge">ZX81</span>
+              <i id="power-lamp" class="lamp power-lamp" title="Power"></i>
+            </div>
+          </div>
+
+          <div class="deck" aria-label="Tape">
+            <div class="tape" id="tape">
+              <span class="slot-no" aria-hidden="true">▭</span>
+              <button class="cart" type="button" id="tape-load" title="Put a program on the tape (.p, .p81, .o, also in a .zip)">
+                <span class="cart-label" id="tape-label">No tape: click or drop a .p or .o</span>
+              </button>
+              <span class="tape-pos" id="tape-pos"></span>
+              <div class="tape-keys">
+                <button type="button" id="tape-run" title="Type LOAD for you">▶ LOAD</button>
+                <button type="button" id="tape-save" title="Download what SAVE recorded">⤓</button>
+                <button type="button" class="eject" id="tape-eject" title="Eject">⏏</button>
+              </div>
+              <p class="note tape-note" id="tape-note"></p>
+            </div>
+            <input id="tape-file" type="file" accept=".p,.p81,.o,.80,.81,.zip" hidden />
+          </div>
+        </section>
+
+        <aside class="panel" aria-label="Keys">
+          <h2>Keys</h2>
+          <p class="note">
+            The keys are the machine's own: a letter at the start of a line is a keyword
+            (on a ZX81, <b>P</b> is PRINT, <b>J</b> LOAD, <b>R</b> RUN, <b>S</b> SAVE, <b>A</b> NEW,
+            <b>K</b> LIST). Symbols are SHIFT with a key, and typing them on your keyboard does that for you.
+          </p>
+          <dl class="keys" id="special-keys">
+            <dt>Enter</dt><dd>NEWLINE</dd>
+            <dt>Backspace</dt><dd>RUBOUT</dd>
+            <dt>Arrows</dt><dd>Cursor keys</dd>
+            <dt>Esc</dt><dd>BREAK</dd>
+          </dl>
+          <h2>FAST and SLOW</h2>
+          <p class="note">
+            A ZX81 runs BASIC between the TV lines (SLOW). In FAST it runs flat out and the picture
+            goes while it works, as it did on the TV. The ZX80 and TK80 only show a picture while
+            they wait for a key.
+          </p>
+        </aside>
+      </main>
+
+      <footer class="foot">
+        K-Prompt · © 2026 Eduardo Stern · <a href="./">ZX Spectrum</a> ·
+        ZX80 and ZX81 ROMs © Amstrad (ZX81: Nine Tiles), shared for emulators · TK85 ROM © Microdigital
+      </footer>
+    </div>
+    <script type="module" src="./src/zx81main.ts"></script>
+  </body>
+</html>

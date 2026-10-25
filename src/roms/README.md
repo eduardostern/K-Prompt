@@ -10,6 +10,9 @@
 | `if1-v2.rom` | ZX Interface 1, ROM v2 (1984), 8K | bb66dd1e | 5cfb6bca4177c45fefd571734576b55e3a127c08 | ZEsarUX `src/if1-v2.rom` |
 | `if1-v1.rom` | ZX Interface 1, ROM v1 (1983), 8K | e72a12ae | 4ffd9ed9c00cdc6f92ce69fdd8b618ef1203f48e | the user's copy; the same as ZEsarUX `src/if1-v1.rom` |
 | `plus2.rom` | ZX Spectrum +2 (1986): ROM 0 then ROM 1 | 5d2e8c66, 98b1320b | 72703f9a3e734f3c23ec34c0727aae4ccbef9a91, de8b0d2d0379cfe7c39322a086ca6da68c7f23cb | Fuse's `roms/plus2-0.rom`, `plus2-1.rom` |
+| `zx80.rom` | Sinclair ZX80 (1980), 4K; also the TK80 | 4c7fc597 | b6769a3197c77009e0933e038c15b43cf4c98c7a | ZEsarUX `src/zx80.rom` |
+| `zx81.rom` | Sinclair ZX81 (1981), 8K, the improved (v2) ROM; also the TK82C | 4b1dd6eb | 7b143ee964e9ada89d1f9e88f0bd48d919184cfc | ZEsarUX `src/zx81.rom` |
+| `tk85.rom` | Microdigital TK85 (1983), 10K: the ZX81's 8K (13 bytes changed) then its own 2K at 2000h | 8972d756 | 7b961a1733fc047eb682150a32e17bca10a018d2 | ZEsarUX `src/tk85.rom` |
 
 The CRCs match MAME's entries for these machines.
 
@@ -23,3 +26,8 @@ no such statement for them, and they are included as other emulators
 
 The Interface 1 ROMs are Sinclair Research's, now Amstrad's like the
 Spectrum's, and are shipped on the same terms as the Spectrum ROMs.
+
+The ZX80 ROM is © Amstrad, which allows its distribution with emulators;
+the ZX81 ROM was written by Nine Tiles for Sinclair, and as far as is
+known neither objects to it being shared with emulators (ZXGATE's note).
+The TK85 ROM is © Microdigital, included as ZEsarUX and MAME include it.

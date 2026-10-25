@@ -15,6 +15,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         history: resolve(__dirname, 'history.html'),
+        zx81: resolve(__dirname, 'zx81.html'),
       },
     },
   },

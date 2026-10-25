@@ -18,6 +18,12 @@ floating bus.
 
 ## What it does
 
+- **ZX81 and ZX80** (`zx81.html`): the ZX81, ZX80, and Microdigital's TK85,
+  TK82C and TK80 at 60 Hz, as sold in Brazil. The CPU draws the picture as
+  on the real machines (the display file executed, characters turned into
+  NOPs and pixels, a line interrupt from R), SLOW and FAST included; `.p`
+  and `.o` programs load and SAVE through the ROM's LOAD and SAVE.
+
 - **Tapes**: `.tap` and `.tzx`. Standard blocks load at once (the ROM's
   LD-BYTES is trapped); turbo loaders, and every tape when you turn fast
   loading off, play in real time through the EAR input, with the stripes
@@ -83,7 +89,8 @@ under the 3-clause BSD licence: see [`programs/FONT-LICENSE.txt`](programs/FONT-
 ## ROMs
 
 The Spectrum ROM is © Amstrad, who allow it to be distributed with
-emulators. The TK90X and TK95 ROMs are © Microdigital. See
+emulators. The TK90X, TK95 and TK85 ROMs are © Microdigital. The ZX80 ROM
+is © Amstrad and the ZX81's by Nine Tiles, shared with emulators. See
 [`src/roms/README.md`](src/roms/README.md).
 
 ## Licence
