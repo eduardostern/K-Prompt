@@ -13,6 +13,11 @@ import romPlus2Url from './roms/plus2.rom?url';
 import romTs2068Url from './roms/ts2068.rom?url';
 import romIf1v2Url from './roms/if1-v2.rom?url';
 import romIf1v1Url from './roms/if1-v1.rom?url';
+import romZx81Url from './roms/zx81.rom?url';
+import romZx80Url from './roms/zx80.rom?url';
+import romTk85Url from './roms/tk85.rom?url';
+import { FRAME_H, FRAME_W, RomName, TapeFile, Zx81, Zx81Model, ZX81_MODELS } from './zx81/machine';
+import { keyForCode, keysFor, SPECIAL, ZxKey } from './zx81/keys';
 import { Cartridge } from './zx/microdrive';
 import termTapUrl from './programs/TERM.tap?url';
 import ulaTapUrl from './programs/ULA.tap?url';
@@ -50,8 +55,14 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 type Joystick = 'kempston' | 'sinclair' | 'cursor' | 'none';
 
+/** A machine on the Model menu: a Spectrum, or one of the ZX81 family (src/zx81/). */
+type Machine = Model | Zx81Model;
+const isZx81 = (m: string): m is Zx81Model => m in ZX81_MODELS;
+
 interface Settings {
-  model: Model;
+  model: Machine;
+  /** RAM of the ZX81 family, in K. */
+  zx81Ram: number;
   tkVideo: TkVideo;
   speed: number;
   fastLoad: boolean;
@@ -72,14 +83,14 @@ interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  model: '48k', tkVideo: '60', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
+  model: '48k', zx81Ram: 16, tkVideo: '60', speed: 1, fastLoad: true, turboTape: true, smooth: false, scanlines: true, curve: true,
   flicker: false, humbar: false, volume: 70, autoPower: false, joystick: 'kempston', keyboard: false, ay48: false, if1: 'off',
 };
 
 function loadSettings(): Settings {
   try {
     const s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
-    if (!(s.model in MODELS)) s.model = '48k';
+    if (!(s.model in MODELS) && !isZx81(s.model)) s.model = '48k';
     if (!(s.tkVideo in TK_VIDEO)) s.tkVideo = '60';
     return s;
   } catch {
@@ -107,15 +118,31 @@ const ROM_URLS: Record<Model, string> = {
 };
 
 /** The name on the case, for the badge. */
-const BADGES: Record<Model, string> = {
+const BADGES: Record<Machine, string> = {
   '48k': 'ZX Spectrum', tk90x: 'TK 90X', tk95: 'TK 95', '128k': 'ZX Spectrum 128', plus2: 'ZX Spectrum +2',
-  ts2068: 'Timex Sinclair 2068',
+  ts2068: 'Timex Sinclair 2068', zx81: 'ZX81', tk85: 'TK 85', tk82c: 'TK 82C', zx80: 'ZX80', tk80: 'TK 80',
 };
+
+/** What the Model menu says about each of the ZX81 family. */
+const ZX81_NOTES: Record<Zx81Model, string> = {
+  zx81: 'Sinclair, 1981: 1K, 8K ROM, SLOW and FAST. 50 Hz, as in Britain.',
+  tk85: 'Microdigital, São Paulo, 1983: a ZX81 with 16K and 2K of extra ROM; 60 Hz (PAL-M).',
+  tk82c: 'Microdigital, 1981: the first Brazilian ZX81, 2K; 60 Hz (PAL-M).',
+  zx80: 'Sinclair, 1980: 4K ROM, whole numbers only, a picture only while it waits for a key.',
+  tk80: 'Microdigital, 1981: the Brazilian ZX80; 60 Hz (PAL-M).',
+};
+
+/** ZX81 paper and ink on a black-and-white TV, and a TV with no picture (ABGR). */
+const ZX81_PAPER = 0xffdcdcdc;
+const ZX81_INK = 0xff141414;
+const ZX81_NO_SIGNAL = 0xff4a4a4a;
 
 async function start(): Promise<void> {
   const roms = {} as Record<Model, Uint8Array>;
   await Promise.all((Object.keys(ROM_URLS) as Model[]).map(async (m) => { roms[m] = await bytes(ROM_URLS[m]); }));
-  const zx = new Spectrum(roms[settings.model], settings.model, SAMPLE_RATE, settings.tkVideo);
+  /** The Spectrum model the Spectrum side runs (the last one picked, while a ZX81 is on the desk). */
+  let spectrumModel: Model = isZx81(settings.model) ? '48k' : settings.model;
+  const zx = new Spectrum(roms[spectrumModel], spectrumModel, SAMPLE_RATE, settings.tkVideo);
   const keys = new KeyInput((held) => { zx.hostKeys = held; });
   keys.onSequence = (chords) => zx.pressKeys(...chords);
   setUpModem(zx);
@@ -134,16 +161,56 @@ async function start(): Promise<void> {
   let image = g.createImageData(WIDTH, HEIGHT);
   let pixels = new Uint32Array(image.data.buffer);
   const fitCanvas = () => {
-    if (canvas.width === zx.ula.width) return;
-    canvas.width = zx.ula.width;
-    image = g.createImageData(zx.ula.width, HEIGHT);
+    const w = zx81 ? WIDTH : zx.ula.width;
+    if (canvas.width === w) return;
+    canvas.width = w;
+    image = g.createImageData(w, HEIGHT);
     pixels = new Uint32Array(image.data.buffer);
   };
-  fitCanvas();
   let running = false;
 
+  // ---- the ZX81 family: the same desk, another machine -----------------------
+
+  const zx81Roms: Record<RomName, Uint8Array> = {
+    zx81: await bytes(romZx81Url), zx80: await bytes(romZx80Url), tk85: await bytes(romTk85Url),
+  };
+  /** The ZX81 (or ZX80, or TK) on the desk, or null while a Spectrum is. */
+  let zx81: Zx81 | null = null;
+  /** Programs SAVEd, the last one first to download. */
+  const zx81Saved: TapeFile[] = [];
+  const zx81Ext = (z: Zx81) => (z.info.zx80 ? 'o' : 'p');
+  const makeZx81 = (m: Zx81Model): Zx81 => {
+    const z = new Zx81(m, zx81Roms[ZX81_MODELS[m].rom], settings.zx81Ram);
+    if (zx81) z.tape = zx81.tape;
+    z.onSave = (file) => {
+      zx81Saved.push(file);
+      const f = { name: `${file.name}.${zx81Ext(z)}`, data: file.data };
+      void shelve(f).then(showShelf);
+      notice(`SAVEd ${f.name}: it is on the shelf, and ⤓ downloads it.`);
+      showTape();
+    };
+    return z;
+  };
+  if (isZx81(settings.model)) zx81 = makeZx81(settings.model);
+  fitCanvas();
+  /** The ZX81's picture where a Spectrum's would be: 256×192 with the border round it. */
+  const drawZx81 = (z: Zx81) => {
+    const x0 = 116 - (WIDTH - 256) / 2;
+    const y0 = (z.info.hz === 50 ? 57 : 33) - (HEIGHT - 192) / 2;
+    const s = z.screen;
+    for (let y = 0; y < HEIGHT; y++) {
+      const sy = y0 + y;
+      for (let x = 0; x < WIDTH; x++) {
+        const sx = x0 + x;
+        const v = sy >= 0 && sy < FRAME_H && sx < FRAME_W ? s[sy * FRAME_W + sx] : s[0] === 2 ? 2 : 0;
+        pixels[y * WIDTH + x] = v === 1 ? ZX81_INK : v === 2 ? ZX81_NO_SIGNAL : ZX81_PAPER;
+      }
+    }
+  };
+
   const draw = () => {
-    pixels.set(zx.ula.frame);
+    if (zx81) drawZx81(zx81);
+    else pixels.set(zx.ula.frame);
     g.putImageData(image, 0, 0);
   };
   const blank = () => {
@@ -156,13 +223,17 @@ async function start(): Promise<void> {
 
   const badge = $('badge');
   const tkVideoField = $('tk-video-field');
-  const isPal = () => zx.timing.frameT > 60_000;
+  const isPal = () => (zx81 ? zx81.info.hz === 50 : zx.timing.frameT > 60_000);
   const applyModel = () => {
     badge.textContent = BADGES[settings.model];
-    document.body.classList.toggle('tk', MODELS[settings.model].tk);
-    tkVideoField.hidden = !MODELS[settings.model].tk;
-    $('ay48-field').hidden = Boolean(MODELS[settings.model].paged || MODELS[settings.model].timex); // these have their own
-    $('if1-field').hidden = Boolean(MODELS[settings.model].timex);
+    document.body.classList.toggle('zx81', Boolean(zx81));
+    const spec = MODELS[spectrumModel];
+    document.body.classList.toggle('tk', !zx81 && spec.tk);
+    tkVideoField.hidden = Boolean(zx81) || !spec.tk;
+    $('ay48-field').hidden = Boolean(spec.paged || spec.timex); // these have their own
+    $('if1-field').hidden = Boolean(spec.timex);
+    if (isZx81(settings.model)) $('zx81-note').textContent = ZX81_NOTES[settings.model];
+    $<HTMLSelectElement>('zx81-ram').value = String(settings.zx81Ram);
     showDrives();
     document.body.classList.toggle('pal', isPal());
   };
@@ -178,9 +249,9 @@ async function start(): Promise<void> {
   const model = $<HTMLSelectElement>('model');
   model.value = settings.model;
   model.addEventListener('change', async () => {
-    const next = model.value as Model;
+    const next = model.value as Machine;
     if (running && !(await askConfirm({
-      title: `Switch to the ${MODELS[next].label}?`,
+      title: `Switch to the ${isZx81(next) ? ZX81_MODELS[next].label : MODELS[next].label}?`,
       message: 'The machine restarts with the other ROM; whatever is in memory is lost.',
       ok: 'Switch',
     }))) {
@@ -190,17 +261,30 @@ async function start(): Promise<void> {
     switchModel(next);
   });
   /** Puts another machine on the desk (its ROM, a reset). */
-  function switchModel(next: Model): void {
+  function switchModel(next: Machine): void {
     settings.model = next;
     model.value = next;
     save();
-    zx.setRom(roms[next], next);
-    applyIf1();
-    rewind.clear();
+    if (isZx81(next)) {
+      zx81 = makeZx81(next);
+      keys.releaseAll();
+    } else {
+      zx81 = null;
+      spectrumModel = next;
+      zx.setRom(roms[next], next);
+      applyIf1();
+      rewind.clear();
+      drawKeyboard();
+    }
     fitCanvas();
     applyModel();
-    drawKeyboard();
+    showTape();
   }
+  $('zx81-ram').addEventListener('change', () => {
+    settings.zx81Ram = Number($<HTMLSelectElement>('zx81-ram').value);
+    save();
+    if (isZx81(settings.model)) switchModel(settings.model);
+  });
 
   const flags: (keyof Settings)[] = ['smooth', 'scanlines', 'curve', 'flicker', 'humbar'];
   const applyLook = () => {
@@ -247,6 +331,7 @@ async function start(): Promise<void> {
   };
   const powerOn = async () => {
     audioContext();
+    if (zx81) zx81.powerCycle();
     zx.reset();
     rewind.clear();
     await warmUp(wrap, isPal());
@@ -261,6 +346,7 @@ async function start(): Promise<void> {
     } else await powerOn();
   });
   $('reset').addEventListener('click', () => {
+    zx81?.reset();
     zx.reset();
     rewind.clear();
     if (!running) void powerOn();
@@ -291,8 +377,31 @@ async function start(): Promise<void> {
     const t = e.target as HTMLElement | null;
     return Boolean(t?.closest('input, select, textarea, dialog'));
   };
+  /** ZX81 keys held, by PC key, with the matrix key each presses. */
+  const zx81Held = new Map<string, ZxKey>();
+  const zx81KeyDown = (z: Zx81, e: KeyboardEvent) => {
+    if (e.ctrlKey) return;
+    if (e.repeat) { e.preventDefault(); return; }
+    // A symbol the PC key types is SHIFT and a key on the ZX81.
+    const sym = e.key.length === 1 && !/[a-z0-9 .]/i.test(e.key) ? keysFor(e.key, z.info.zx80) : undefined;
+    const k = SPECIAL[e.key] ?? sym ?? keyForCode(e.code);
+    if (!k) return;
+    e.preventDefault();
+    if (k.shift) z.key(0, 0, true);
+    z.key(k.row, k.bit, true);
+    zx81Held.set(e.code, k);
+  };
+  const zx81KeyUp = (z: Zx81, e: KeyboardEvent) => {
+    const k = zx81Held.get(e.code);
+    if (!k) return;
+    zx81Held.delete(e.code);
+    z.key(k.row, k.bit, false);
+    if (k.shift) z.key(0, 0, false);
+    if (zx81Held.has('ShiftLeft') || zx81Held.has('ShiftRight')) z.key(0, 0, true);
+  };
   window.addEventListener('keydown', (e) => {
     if (typing(e) || e.metaKey) return;
+    if (zx81) { if (running) zx81KeyDown(zx81, e); return; }
     if (HOTKEYS[e.code]) { e.preventDefault(); if (!e.repeat) HOTKEYS[e.code](); return; }
     if (!running) return;
     if (settings.joystick !== 'none' && STICK_KEYS[e.code]) {
@@ -304,6 +413,7 @@ async function start(): Promise<void> {
     if (keys.keyDown(e.code, e.key)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => {
+    if (zx81) { zx81KeyUp(zx81, e); return; }
     if (STICK_KEYS[e.code] && settings.joystick !== 'none') {
       stick[STICK_KEYS[e.code]] = false;
       applyStick();
@@ -313,6 +423,8 @@ async function start(): Promise<void> {
   });
   window.addEventListener('blur', () => {
     keys.releaseAll();
+    zx81Held.clear();
+    zx81?.keys.fill(0x1f);
     for (const k of Object.keys(stick) as (keyof typeof stick)[]) stick[k] = false;
     applyStick();
   });
@@ -403,6 +515,15 @@ async function start(): Promise<void> {
   };
 
   const showTape = () => {
+    if (zx81) {
+      const files = zx81.tape;
+      tapeBox.classList.toggle('full', files.length > 0);
+      tapeBox.classList.remove('playing');
+      tapeLabel.textContent = files.length ? files.map((f) => f.name).join(' · ') : `No tape: click or drop a .${zx81Ext(zx81)}`;
+      tapePos.textContent = files.length ? `${Math.min(zx81.tapePos + 1, files.length)}/${files.length}` : '';
+      if (performance.now() >= noticeUntil) tapeNote.textContent = files.length ? '▶ LOAD types LOAD for you.' : '';
+      return;
+    }
     const t = zx.tape;
     tapeBox.classList.toggle('full', Boolean(t));
     tapeBox.classList.toggle('playing', Boolean(t?.playing));
@@ -435,8 +556,17 @@ async function start(): Promise<void> {
     showTape();
   };
 
+  /** Types LOAD on the ZX81 family: J "" on a ZX81, W on a ZX80. */
+  const typeZx81Load = (z: Zx81) => {
+    z.tapePos = 0;
+    z.pressKeys(z.info.zx80
+      ? [keysFor('W')!, keysFor('\n')!]
+      : [keysFor('J')!, keysFor('"')!, keysFor('"')!, keysFor('\n')!]);
+    if (!running) void powerOn();
+  };
   /** Resets and starts the tape: LOAD "" on a 48K, the Tape Loader on a 128K. */
   const typeLoad = () => {
+    if (zx81) { typeZx81Load(zx81); return; }
     zx.reset();
     rewind.clear();
     zx.tape?.rewind();
@@ -619,11 +749,31 @@ async function start(): Promise<void> {
     try {
       if (/\.zip$/i.test(file.name)) {
         const files = unzipSync(file.data);
-        const inner = Object.keys(files).find((n) => /\.(tap|tzx|z80|sna|mdr)$/i.test(n));
-        if (!inner) throw new Error('no .tap, .tzx, .z80, .sna or .mdr inside this .zip');
+        const inner = Object.keys(files).find((n) => /\.(tap|tzx|z80|sna|mdr|p|p81|o)$/i.test(n));
+        if (!inner) throw new Error('no .tap, .tzx, .z80, .sna, .mdr, .p or .o inside this .zip');
         file = { name: inner.split('/').pop()!, data: files[inner] };
       }
       if (file.data.length > MAX_FILE) throw new Error('that file is too big to be a Spectrum tape or snapshot');
+      if (/\.(p|p81|81|o|80)$/i.test(file.name)) {
+        // A ZX81 (.p) or ZX80 (.o) program: on the right machine's tape, and LOAD typed.
+        const forZx80 = /\.(o|80)$/i.test(file.name);
+        if (!zx81 || zx81.info.zx80 !== forZx80) switchModel(forZx80 ? 'zx80' : 'zx81');
+        let data = file.data;
+        if (/\.(p81|81)$/i.test(file.name)) {
+          let i = 0; // .p81: the name first, its last letter with bit 7 set
+          while (i < data.length && !(data[i] & 0x80)) i++;
+          data = data.slice(i + 1);
+        }
+        zx81!.tape.push({ name: file.name.replace(/^.*\//, '').replace(/\.[^.]*$/, ''), data });
+        showTape();
+        if (fromOutside) await shelve(file);
+        void showShelf();
+        if (!running) await powerOn();
+        typeZx81Load(zx81!);
+        return;
+      }
+      // A Spectrum file while a ZX81 is on the desk: the Spectrum comes back.
+      if (zx81) switchModel(spectrumModel);
       if (/\.mdr$/i.test(file.name)) {
         insertCartridge(file);
       } else if (isSnapshot(file.name)) {
@@ -665,6 +815,7 @@ async function start(): Promise<void> {
   });
   $('tape-rewind').addEventListener('click', () => { zx.tape?.rewind(); showTape(); });
   $('tape-eject').addEventListener('click', () => {
+    if (zx81) { zx81.tape = []; zx81.tapePos = 0; showTape(); return; }
     zx.tape = null;
     tapeSource = null;
     void saveDeck(null);
@@ -678,6 +829,12 @@ async function start(): Promise<void> {
     notice('A blank tape: SAVE "name" records onto it.');
   });
   $('tape-save').addEventListener('click', () => {
+    if (zx81) {
+      const last = zx81Saved[zx81Saved.length - 1];
+      if (last) download(`${last.name}.${zx81Ext(zx81)}`, last.data);
+      else notice(zx81.info.zx80 ? 'Nothing SAVEd yet: SAVE (E) records.' : 'Nothing SAVEd yet: SAVE "NAME" records.');
+      return;
+    }
     const t = zx.tape;
     if (!t) return;
     download(t.name.replace(/\.tzx$/i, '.tap'), t.toTap());
@@ -787,8 +944,25 @@ async function start(): Promise<void> {
     owed += Math.min(now - last, 250);
     last = now;
     if (!running) { owed = 0; return; }
-    pollPad();
     let ran = 0;
+    if (zx81) {
+      const ms = 1000 / zx81.info.hz / settings.speed;
+      const most = 4 * settings.speed;
+      while (owed >= ms && ran < most) { owed -= ms; zx81.runFrame(); ran++; }
+      if (ran === most) owed = 0;
+      if (ran) draw();
+      statFrames += ran;
+      if (now - statTime >= 1000) {
+        const f = (statFrames * 1000) / (now - statTime);
+        fps.textContent = `${f.toFixed(0)} / s`;
+        mhz.textContent = `${((f * zx81.frameT) / 1e6).toFixed(2)} MHz`;
+        statFrames = 0;
+        statTime = now;
+        showTape();
+      }
+      return;
+    }
+    pollPad();
     // While a tape plays in real time, run as fast as the host allows (no sound).
     const turbo = settings.turboTape && zx.tapePlaying;
     if (turbo) {

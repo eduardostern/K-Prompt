@@ -580,3 +580,8 @@ kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); bor
 .ai-howto summary { cursor: pointer; color: var(--text); }
 .ai-howto ol { margin: 6px 0 0; padding-left: 18px; line-height: 1.45; }
 .ai-howto a { color: var(--accent); }
+
+/* The ZX81 family shares the page: Spectrum-only controls go, its own come. */
+body.zx81 .spectrum-only { display: none !important; }
+body:not(.zx81) .zx81-only { display: none !important; }
+.zx81 .stripes { display: none; }

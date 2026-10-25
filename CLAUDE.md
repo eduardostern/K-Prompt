@@ -54,8 +54,7 @@ core tests, every bus event with its T-state) runs in `npm test`.
 | `src/zx/z80asm.ts`, `src/zx/tape-file.ts`, `scripts/build-*.ts` | Assembler (from Ok-Prompt) and code tapes, used by the build scripts and the AI board; `npm run tapes` builds `src/programs/*.tap` |
 | `programs/ULA.asm`, `scripts/build-ula.ts` | The multicolour and colour clash demo; the T-state-counted part is generated |
 | `programs/ULA2.asm`, `scripts/build-ula2.ts`, `spectrum-image.ts` | A beach photo with the clash fixed down the middle (8×1 attributes, 16 columns × 192 lines); `beach.png` is CC0 |
-| `zx81.html`, `src/zx81main.ts` | The ZX80/ZX81 page: its own machine, tape and keys (the Spectrum page is `main.ts`) |
-| `src/zx81/machine.ts`, `keys.ts` | `Zx81`: ZX81, TK82C, TK85, ZX80, TK80; display by M1 fetches (`cpu.fetchOp`), INT from R bit 6, NMI generator, VSYNC on IN/OUT, LOAD/SAVE traps |
+| `src/zx81/machine.ts`, `keys.ts` | `Zx81` (on the Model menu with the Spectrums; main.ts runs it instead of `Spectrum` while `zx81` is set, and `body.zx81` hides the Spectrum-only controls): ZX81, TK82C, TK85, ZX80, TK80; display by M1 fetches (`cpu.fetchOp`), INT from R bit 6, NMI generator, VSYNC on IN/OUT, LOAD/SAVE traps |
 | `src/roms/` | `zx80.rom`, `zx81.rom`, `tk85.rom` (10K: ZX81 8K + 2K at 2000h); `48k.rom`, `tk90x.rom`, `tk95.rom`; `128k.rom`, `plus2.rom` are both ROMs, 32K; `ts2068.rom` home + EXROM, 24K (see `src/roms/README.md`) |
 
 ## Spectrum facts that are easy to get wrong

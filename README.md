@@ -18,8 +18,8 @@ floating bus.
 
 ## What it does
 
-- **ZX81 and ZX80** (`zx81.html`): the ZX81, ZX80, and Microdigital's TK85,
-  TK82C and TK80 at 60 Hz, as sold in Brazil. The CPU draws the picture as
+- **ZX81 and ZX80**, on the same Model menu: the ZX81, ZX80, and
+  Microdigital's TK85, TK82C and TK80 at 60 Hz, as sold in Brazil. The CPU draws the picture as
   on the real machines (the display file executed, characters turned into
   NOPs and pixels, a line interrupt from R), SLOW and FAST included; `.p`
   and `.o` programs load and SAVE through the ROM's LOAD and SAVE.
