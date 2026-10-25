@@ -5,7 +5,7 @@ import { BORDER_TOP, BORDER_X, contentionTable, HEIGHT, PALETTE, Ula, WIDTH } fr
 import { blankTape, checksum, parseTap, parseTape } from '../src/zx/tape';
 import { loadSnapshot, saveSna, saveZ80, snapshotKind } from '../src/zx/snapshot';
 import { TK_WORDS } from '../src/zx/legend';
-import { fiveBytes, programTape, tokenize } from '../src/zx/basic';
+import { detokenize, fiveBytes, programTape, tokenize } from '../src/zx/basic';
 import { Rewind } from '../src/zx/rewind';
 
 const rom = (name: string) => new Uint8Array(readFileSync(new URL(`../src/roms/${name}.rom`, import.meta.url)));
@@ -717,5 +717,39 @@ describe('rewind', () => {
     zx.onFrame = () => rw.tick(zx);
     for (let f = 0; f < 120; f++) zx.runFrame();
     expect(rw.length).toBe(2);
+  });
+});
+
+describe('detokenize', () => {
+  it('turns a program back into a listing the tokenizer reads the same', () => {
+    const listing = [
+      '10 REM hello: PRINT "x"',
+      '20 LET a$="GO TO 30: x"',
+      '30 FOR i=1 TO 10 STEP 2: PRINT AT i,5;i*2.5;: NEXT i',
+      '40 IF INKEY$ ="" THEN GO TO 40',
+      '50 PRINT "£©"; BIN 1010; -1e3',
+      '100 DEF FN f(x)=x*x: RETURN',
+    ].join('\n');
+    const p = tokenize(listing);
+    expect(detokenize(p)).toBe(listing);
+    expect(Array.from(tokenize(detokenize(p)))).toEqual(Array.from(p));
+  });
+
+  it('reads a program the ROM SAVEd to tape', () => {
+    const zx = boot();
+    zx.tape = blankTape();
+    zx.typeText('10');
+    zx.pressKeys([KEYS.P]); // PRINT
+    zx.typeText('7*6\n');
+    zx.typeText('20');
+    zx.pressKeys([KEYS.G]); // GO TO
+    zx.typeText('10\n');
+    zx.pressKeys([KEYS.S]); // SAVE
+    zx.typeText('"prog"\n');
+    settle(zx, 30);
+    zx.pressKeys([KEYS.ENTER]);
+    settle(zx, 120);
+    const data = parseTap('p.tap', zx.tape.toTap()).blocks[1].data!;
+    expect(detokenize(data.subarray(1, data.length - 1))).toBe('10 PRINT 7*6\n20 GO TO 10');
   });
 });

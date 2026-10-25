@@ -172,3 +172,54 @@ export function programTape(name: string, program: Uint8Array, autostart?: numbe
   for (const b of [header, data]) out.push(b.length & 0xff, b.length >> 8, ...b);
   return Uint8Array.from(out);
 }
+
+/**
+ * A program (the bytes between PROG and VARS, as a tape holds it) back to
+ * a listing: keywords spelled out with a space either side, the hidden
+ * 5-byte numbers dropped, strings and REM kept. Colour control codes in a
+ * line (INK 10h-15h and the byte after) are dropped, graphics and UDG
+ * characters (80h-A4h) become '?'. The tokenizer reads it back the same.
+ */
+export function detokenize(program: Uint8Array): string {
+  const lines: string[] = [];
+  let i = 0;
+  while (i + 4 <= program.length) {
+    const no = (program[i] << 8) | program[i + 1];
+    const len = program[i + 2] | (program[i + 3] << 8);
+    if (no > 9999) break; // the variables follow
+    const end = Math.min(i + 4 + len, program.length);
+    let text = '';
+    let inString = false;
+    let inRem = false;
+    for (let k = i + 4; k < end; k++) {
+      const b = program[k];
+      if (b === 0x0d) break;
+      if (inRem || inString) {
+        if (b === 0x22 && inString) inString = false;
+        text += charOf(b);
+        continue;
+      }
+      if (b === 0x0e) { k += 5; continue; } // the hidden number
+      if (b >= 0x10 && b <= 0x15) { k++; continue; } // INK ... OVER with their value
+      if (b >= 0xa5) {
+        const word = TOKENS[b - 0xa5];
+        if (text && !text.endsWith(' ') && /[A-Za-z0-9$]/.test(word[0])) text += ' ';
+        text += word + ' ';
+        if (b === REM) inRem = true;
+        continue;
+      }
+      if (b === 0x22) inString = true;
+      text += charOf(b);
+    }
+    lines.push(`${no} ${text.trimEnd()}`);
+    i += 4 + len;
+  }
+  return lines.join('\n');
+}
+
+function charOf(b: number): string {
+  if (b === 0x60) return '£';
+  if (b === 0x7f) return '©';
+  if (b >= 0x20 && b < 0x80) return String.fromCharCode(b);
+  return '?';
+}
