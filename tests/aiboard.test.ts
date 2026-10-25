@@ -10,6 +10,8 @@ import {
 } from '../src/ai/aiboard';
 import { checkBasic, checkZ80 } from '../src/ai/check';
 import type { ChatOptions, ChatChunk } from '../src/ai/deepseek';
+import { ZFile, ZmodemReceiver, ZmodemSender } from '../src/ai/zmodem';
+import { programTape, tokenize } from '../src/zx/basic';
 
 const rom48 = new Uint8Array(readFileSync(new URL('../src/roms/48k.rom', import.meta.url)));
 
@@ -30,7 +32,13 @@ const GOOD_Z80 = [
   'msg: db "Z80 SAYS HI",0',
 ].join('\n');
 
-function setup(initialKey: string | null) {
+/**
+ * The board on a Spectrum's modem, with the caller's side of ZMODEM played
+ * by the TypeScript receiver and sender: `zmodem` false is a terminal
+ * without it (the board then falls back to the deck), and `upload` is the
+ * file the caller sends for Fix.
+ */
+function setup(initialKey: string | null, opts: { zmodem?: boolean; upload?: ZFile } = {}) {
   const zx = new Spectrum(rom48);
   let key = initialKey;
   const calls: ChatOptions[] = [];
@@ -51,17 +59,44 @@ function setup(initialKey: string | null) {
     cps: 0,
   });
   let screen = '';
-  const drain = () => { while (zx.modem.available) screen += String.fromCharCode(zx.modem.read()); return screen; };
+  const received: ZFile[] = [];
+  let rx: ZmodemReceiver | null = null;
+  let seen = 0;
+  let tx: ZmodemSender | null = null;
+  const toBoard = (b: Uint8Array) => { for (const x of b) zx.modem.write(x); };
+  const drain = () => {
+    const bytes: number[] = [];
+    while (zx.modem.available) bytes.push(zx.modem.read());
+    // Everything lands on the screen too: what follows a transfer may share its last chunk.
+    screen += String.fromCharCode(...bytes);
+    if (rx) rx.receive(bytes);
+    else if (tx) tx.receive(bytes);
+    // A ZMODEM transfer starting: the board sends (ZRQINIT) or wants a file (ZRINIT).
+    const fresh = screen.slice(seen);
+    if (!rx && !tx && opts.zmodem !== false && fresh.includes('**\x18B00')) {
+      seen = screen.length;
+      rx = new ZmodemReceiver(toBoard, (_ok, files) => { received.push(...files); rx = null; seen = screen.length; });
+      rx.start();
+    } else if (!rx && !tx && opts.upload && fresh.includes('**\x18B01')) {
+      seen = screen.length;
+      tx = new ZmodemSender([opts.upload], toBoard, () => { tx = null; seen = screen.length; });
+      tx.start();
+    }
+    return screen;
+  };
   const type = (s: string) => { for (const c of s) zx.modem.write(c.charCodeAt(0)); };
   const waitFor = async (text: string) => {
     for (let i = 0; i < 2000; i++) {
       if (drain().includes(text)) return;
       await new Promise((r) => setTimeout(r, 5));
     }
-    throw new Error(`timed out waiting for ${JSON.stringify(text)}; screen:\n${screen}`);
+    throw new Error(`timed out waiting for ${JSON.stringify(text)}; screen ends:\n${screen.slice(-800)}`);
   };
-  return { zx, type, waitFor, calls, answers, tapes, getKey: () => key, screen: () => drain() };
+  return { zx, type, waitFor, calls, answers, tapes, received, getKey: () => key, screen: () => drain() };
 }
+
+/** The board ignores input for a moment after a transfer (its trailing bytes). */
+const afterTransfer = () => new Promise((r) => setTimeout(r, 1600));
 
 /** Loads a delivered tape on a fresh 48K and returns its screen after it ran. */
 function runTape(tap: Uint8Array): string {
@@ -85,7 +120,6 @@ describe('AI board', () => {
     expect(b.getKey()).toBe('sk-test-123456');
     expect(b.screen()).toContain('**************'); // the key is not echoed
     expect(b.screen()).toContain('sk-...3456');
-    expect(b.screen()).not.toContain('[F]'); // no uploads: there is no ZMODEM on a Spectrum
 
     b.answers.push([{ kind: 'text', text: 'word '.repeat(40) }]);
     b.type('C');
@@ -181,11 +215,12 @@ describe('AI board', () => {
     expect(b.screen()).toContain('Sending them back for a fix (try 2 of 3)');
     expect(b.screen()).toContain('[DeepSeek is thinking]\r\n  plan');
     expect(b.screen()).toContain('[DeepSeek is writing hello]');
-    expect(b.screen()).toContain('The tape hello is in your deck');
+    expect(b.screen()).toContain('Sending hello.tap by ZMODEM');
     expect(b.calls[0].messages[0]).toEqual({ role: 'system', content: BASIC_PROMPT });
     expect(b.calls[1].messages.at(-1)!.content).toMatch(/^The Spectrum stopped with these reports:\n2 Variable not found/);
-    expect(b.tapes.map((t) => t.name)).toEqual(['hello']);
-    expect(runTape(b.tapes[0].tap)).toContain('HELLO FROM THE AI BOARD');
+    expect(b.received.map((f) => f.name)).toEqual(['hello.tap']);
+    expect(b.screen()).toContain('Transfer complete: hello is on your tape');
+    expect(runTape(b.received[0].data)).toContain('HELLO FROM THE AI BOARD');
   }, 30_000);
 
   it('writes Z80, sends the assembler\'s error back, and delivers a tape that runs', async () => {
@@ -204,7 +239,7 @@ describe('AI board', () => {
     await b.waitFor('Change: ');
     expect(b.calls[0].messages[0]).toEqual({ role: 'system', content: Z80_PROMPT });
     expect(b.calls[1].messages.at(-1)!.content).toContain('line 2: unknown instruction LOD');
-    expect(runTape(b.tapes[0].tap)).toContain('Z80 SAYS HI');
+    expect(runTape(b.received[0].data)).toContain('Z80 SAYS HI');
   }, 30_000);
 
   it('takes more changes after a delivery, with the whole conversation, until Enter', async () => {
@@ -222,14 +257,18 @@ describe('AI board', () => {
     await b.waitFor('Change: ');
     expect(b.screen()).toContain('More changes to hello?');
     b.answers.push([{ kind: 'text', text: GOOD_BASIC.replace('HELLO FROM', 'GOODBYE FROM') }]);
+    await afterTransfer();
     b.type('say goodbye\r');
-    await b.waitFor('Writing');
-    for (let i = 0; i < 400 && b.tapes.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    await b.waitFor('Changing hello');
+    // Pump the line (screen() drains it) until the second tape has come.
+    for (let i = 0; i < 2000 && b.received.length < 2; i++) { b.screen(); await new Promise((r) => setTimeout(r, 5)); }
     const second = b.calls[1].messages;
     expect(second[1].content).toContain('say hello');
     expect(second[2].role).toBe('assistant');
     expect(second[3].content).toContain('asks for more: say goodbye');
-    expect(runTape(b.tapes[1].tap)).toContain('GOODBYE FROM THE AI BOARD');
+    expect(runTape(b.received[1].data)).toContain('GOODBYE FROM THE AI BOARD');
+    await b.waitFor('Change: ');
+    await afterTransfer();
     b.type('\r');
     await b.waitFor('Choice: ');
   }, 30_000);
@@ -249,7 +288,64 @@ describe('AI board', () => {
     b.type('hello\r');
     await b.waitFor('Change: ');
     expect(b.screen()).toContain('No listing came back');
-    expect(b.tapes.length).toBe(1);
+    expect(b.received.length).toBe(1);
+  }, 30_000);
+
+  it('puts the tape in the deck when the terminal has no ZMODEM (BREAK)', async () => {
+    const b = setup('sk-test', { zmodem: false });
+    b.type('ATDT AI\r');
+    await b.waitFor('Choice: ');
+    b.answers.push([{ kind: 'text', text: GOOD_BASIC }]);
+    b.type('P');
+    await b.waitFor('Program: ');
+    b.type('say hello\r');
+    await b.waitFor('[B/M]');
+    b.type('B');
+    await b.waitFor('name for the tape');
+    b.type('hello\r');
+    await b.waitFor('Sending hello.tap by ZMODEM');
+    b.type('\x1b');
+    await b.waitFor('Change: ');
+    expect(b.screen()).toContain('No ZMODEM (cancelled): the tape hello is in your deck');
+    expect(b.tapes.map((t) => t.name)).toEqual(['hello']);
+    expect(runTape(b.tapes[0].tap)).toContain('HELLO FROM THE AI BOARD');
+  }, 30_000);
+
+  it('fixes an uploaded BASIC program: the listing goes to the model, the fix comes back on tape', async () => {
+    const buggy = tokenize('10 PRINT "SUM IS"\n20 PRINT a+b');
+    const upload = { name: 'SUMS.tap', data: programTape('sums', buggy, 10) };
+    const b = setup('sk-test', { upload });
+    b.type('ATDT AI\r');
+    await b.waitFor('Choice: ');
+    expect(b.screen()).toContain('[F] Fix my BASIC program');
+    b.type('F');
+    await b.waitFor('Fix: ');
+    expect(b.screen()).toContain('Got sums, 2 lines of BASIC');
+    expect(b.screen()).toContain('2 Variable not found, 20:1');
+    b.answers.push([{ kind: 'text', text: '10 PRINT "SUM IS"\n15 LET a=2: LET b=3\n20 PRINT a+b' }]);
+    await afterTransfer();
+    b.type('set a and b\r');
+    await b.waitFor('Change: ');
+    const ask = b.calls[0].messages;
+    expect(ask[0].content).toContain('keep the rest of the program as it is');
+    expect(ask[1].content).toContain('Here is sums:\n\n10 PRINT "SUM IS"\n20 PRINT a+b');
+    expect(ask[1].content).toContain('it stopped with: 2 Variable not found, 20:1');
+    expect(ask[1].content).toContain('The caller says: set a and b');
+    expect(b.received.map((f) => f.name)).toEqual(['sums.tap']);
+    expect(runTape(b.received[0].data)).toContain('SUM IS\n5');
+  }, 30_000);
+
+  it('refuses an upload that is machine code, and BREAK gives up waiting', async () => {
+    const code = { name: 'CODE.tap', data: Uint8Array.from([19, 0, 0, 3, ...'code      '.split('').map((c) => c.charCodeAt(0)), 2, 0, 0, 128, 0, 128, 0x10, 4, 0, 0xff, 1, 2, 0xfc]) };
+    // Fix the header checksum so the tape parses as one.
+    let x = 0; for (let i = 2; i < 20; i++) x ^= code.data[i]; code.data[20] = x;
+    const b = setup('sk-test', { upload: code });
+    b.type('ATDT AI\r');
+    await b.waitFor('Choice: ');
+    b.type('F');
+    await b.waitFor('is machine code: only BASIC can be fixed');
+    await b.waitFor('Choice: ');
+    expect(b.calls.length).toBe(0);
   }, 30_000);
 
   it('keeps a long session within the history limit, latest source last', () => {

@@ -8,11 +8,17 @@
  * DeepSeek V4.1 Flash chats, or writes a program: Sinclair BASIC, run on a
  * hidden Spectrum to catch the ROM's error reports, or Z80 machine code,
  * assembled here. Errors go back to the model to fix (three tries); the
- * program arrives as a tape on the shelf and in the deck.
+ * program goes down the line by ZMODEM as a .tap, which TERM saves to the
+ * tape in the deck (if the transfer fails, the tape is put in the deck
+ * directly). The caller can also upload a BASIC program by ZMODEM (TERM
+ * sends a file from the tape) and have it fixed the same way.
  */
 import type { Link, LinkHandlers } from '../zx/modem';
 import { TelnetServer } from './telnet-server';
 import { ChatFn, ChatMessage, DeepSeekError, explain } from './deepseek';
+import { ZFile, ZmodemReceiver, ZmodemSender } from './zmodem';
+import { detokenize } from '../zx/basic';
+import { parseTap } from '../zx/tape';
 
 export type Lang = 'basic' | 'z80';
 
@@ -41,6 +47,10 @@ export interface AiBoardDeps {
 /** TERM shows 64 columns: keep two spare. */
 const WIDTH = 62;
 const FIX_TRIES = 3;
+/** Largest upload: a tape file in TERM's buffer is smaller than this. */
+export const MAX_UPLOAD = 48 * 1024;
+/** After a transfer, how long control bytes on an empty line count as its debris. */
+const SETTLE_MS = 1500;
 const ESC = 0x1b, BS = 8, DEL = 127, CR = 13, LF = 10;
 
 /** Plain ASCII for the Spectrum's terminal: anything else as '?'. */
@@ -198,6 +208,14 @@ The machine:
 - Keep it under about 300 lines and right first time: check every label is
   defined and every register holds what you think after each CALL.`;
 
+export const FIX_PROMPT = `${BASIC_PROMPT}
+
+This time the caller sends an existing program and says what is wrong with
+it or what to change. Make that change and fix any errors the Spectrum
+reported, but keep the rest of the program as it is: its line numbers,
+names, REMs and style. Do not rewrite what works. Output the whole
+corrected listing, only the listing.`;
+
 /** The prompt for a language. */
 const PROMPTS: Record<Lang, string> = { basic: BASIC_PROMPT, z80: Z80_PROMPT };
 const LANG_NAMES: Record<Lang, string> = { basic: 'BASIC', z80: 'machine code' };
@@ -221,7 +239,27 @@ export function cleanSource(text: string): string {
   return src.replace(/^\n+/, '').replace(/\s+$/, '') + '\n';
 }
 
-type Mode = 'key' | 'menu' | 'chat' | 'describe' | 'lang' | 'name' | 'busy' | 'more' | 'bye';
+type Mode = 'key' | 'menu' | 'chat' | 'describe' | 'lang' | 'name' | 'busy' | 'zmodem' | 'upload' | 'fix' | 'more' | 'bye';
+
+/** A BASIC program from an uploaded .tap: its name and listing, or why not. */
+export function uploadedProgram(file: ZFile): { name: string; listing: string } | { error: string } {
+  let blocks;
+  try {
+    blocks = parseTap(file.name, file.data).blocks;
+  } catch {
+    return { error: 'is not a tape file' };
+  }
+  const head = blocks.find((b) => b.data && b.data.length === 19 && b.data[0] === 0x00);
+  if (!head?.data) return { error: 'has no tape header' };
+  if (head.data[1] !== 0) return { error: head.data[1] === 3 ? 'is machine code: only BASIC can be fixed' : 'is not a BASIC program' };
+  const body = blocks[blocks.indexOf(head) + 1]?.data;
+  if (!body || body[0] !== 0xff) return { error: 'has no program after its header' };
+  const progLen = head.data[16] | (head.data[17] << 8);
+  const program = body.subarray(1, 1 + Math.min(progLen, body.length - 2));
+  const name = String.fromCharCode(...head.data.subarray(2, 12)).trimEnd() || 'program';
+  const listing = detokenize(program);
+  return listing.trim() ? { name, listing } : { error: 'has an empty program' };
+}
 
 /** Whether an answer looks like a program in that language (not all thinking, or prose). */
 export function looksLike(lang: Lang, source: string): boolean {
@@ -368,6 +406,16 @@ class AiBoard implements Link {
   private pumping = false;
   private closed = false;
   private abort?: AbortController;
+  private sender?: ZmodemSender;
+  private receiver?: ZmodemReceiver;
+  /** The uploaded listing to fix, and what the Spectrum said about it. */
+  private fixSource = '';
+  private fixErrors: string[] = [];
+  /** Until when (ms) control bytes on an empty line are transfer debris. */
+  private settleUntil = 0;
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
   /**
    * The program being worked on: the whole conversation with DeepSeek (the
    * request, every version, the errors), so after each build the caller can
@@ -394,12 +442,27 @@ class AiBoard implements Link {
 
   send(bytes: Uint8Array): void {
     if (this.closed) return;
-    for (const b of this.telnet.strip(bytes)) this.key(b);
+    const data = this.telnet.strip(bytes);
+    if (this.mode === 'zmodem') {
+      // ESC (BREAK) before the terminal answers gives up on the transfer.
+      if (this.sender && !this.sender.started && data.includes(ESC)) { this.sender.cancel(); return; }
+      this.sender?.receive(data);
+      return;
+    }
+    if (this.mode === 'upload' && this.receiver) {
+      // ESC before the upload starts gives up; after that only ZMODEM's own cancel.
+      if (!this.receiver.started && data.includes(ESC)) { this.receiver.cancel(true); return; }
+      this.receiver.receive(data);
+      return;
+    }
+    for (const b of data) this.key(b);
   }
 
   close(): void {
     this.closed = true;
     this.abort?.abort();
+    this.sender?.cancel();
+    this.receiver?.cancel(true);
   }
 
   // ---- output --------------------------------------------------------
@@ -478,6 +541,7 @@ class AiBoard implements Link {
       '\r\n  [C] Chat with the AI sysop\r\n' +
       '  [B] Chat with the Bastard Operator From Hell\r\n' +
       '  [P] Order a program (BASIC or Z80, on a tape)\r\n' +
+      '  [F] Fix my BASIC program (upload it from tape)\r\n' +
       '  [K] Forget my API key\r\n' +
       '  [G] Goodbye\r\n\r\nChoice: ',
     );
@@ -493,13 +557,18 @@ class AiBoard implements Link {
   // ---- input ---------------------------------------------------------
 
   private key(b: number): void {
+    // The end of a ZMODEM transfer trails bytes: the ZFIN header's CR LF and
+    // XON, "OO", a sender's repeated ZFIN ("**^XB08..."). For a moment after
+    // a transfer, input is that, not the caller: a "B" in a header must not
+    // pick the BOFH from the menu.
+    if (this.now() < this.settleUntil) return;
     switch (this.mode) {
       case 'menu': return this.menuKey(b);
       case 'lang': return this.langKey(b);
       case 'busy':
         if (b === ESC) this.abort?.abort();
         return;
-      case 'bye': return;
+      case 'bye': case 'zmodem': case 'upload': return;
       default: return this.lineKey(b);
     }
   }
@@ -517,6 +586,11 @@ class AiBoard implements Link {
         'times table, or a number guessing game).\r\n\r\nProgram: ');
       this.mode = 'describe';
       this.line = '';
+    } else if (c === 'F') {
+      this.say('F\r\n\r\nSAVE your program to tape first. Then, in the terminal,\r\n' +
+        'press EXTEND, then U: it loads the next file from the tape\r\n' +
+        'in your deck and sends it here by ZMODEM. BREAK gives up.\r\n');
+      this.startUpload();
     } else if (c === 'K') {
       this.deps.setKey(null);
       this.say('K\r\n\r\nKey forgotten.\r\n');
@@ -577,6 +651,10 @@ class AiBoard implements Link {
         this.progText = text;
         this.say('\r\nIn BASIC or in machine code? [B/M] ');
         this.mode = 'lang';
+        return;
+      case 'fix':
+        this.progText = text || 'Make it run without errors and fix any bugs you find.';
+        void this.fixProgram();
         return;
       case 'more':
         if (!text || text.toLowerCase() === '/menu') {
@@ -693,6 +771,24 @@ class AiBoard implements Link {
     ]);
   }
 
+  private async fixProgram(): Promise<void> {
+    const name = this.progName;
+    this.session = undefined;
+    this.say(`\r\nFixing ${name} with DeepSeek V4.1 Flash. This can take a\r\nminute; BREAK gives up.\r\n`);
+    const errors = this.fixErrors.length
+      ? `Run on a Spectrum, it stopped with: ${this.fixErrors.join('; ')}`
+      : 'Run on a Spectrum for ten seconds, it stopped with no error.';
+    await this.build(name, 'basic', [
+      { role: 'system', content: FIX_PROMPT },
+      {
+        role: 'user',
+        content: `Here is ${name}:\n\n${this.fixSource}\n\n${errors}\n\nThe caller says: ${this.progText}\n` +
+          'Output the whole corrected listing, only the listing.',
+      },
+    ]);
+    this.fixSource = '';
+  }
+
   /** Another pass on the session's program, with everything said so far. */
   private async revise(text: string): Promise<void> {
     const s = this.session!;
@@ -712,6 +808,7 @@ class AiBoard implements Link {
       'or press Enter alone for the menu. DeepSeek remembers this\r\nprogram and what you asked.\r\n\r\nChange: ');
     this.mode = 'more';
     this.line = '';
+    this.settleUntil = this.now() + SETTLE_MS;
   }
 
   /** Asks for the program, checks it (errors go back, three tries) and delivers its tape. */
@@ -765,12 +862,86 @@ class AiBoard implements Link {
       this.morePrompt();
       return;
     }
-    this.deps.deliver(name, result.tap);
-    this.say(
-      `\r\nThe tape ${name} is in your deck and on the shelf. Leave\r\n` +
-      'the terminal with EDIT (the call stays up), then LOAD "".\r\n',
-    );
-    this.morePrompt();
+    this.say(`\r\nSending ${name}.tap by ZMODEM: the terminal saves it to the\r\n` +
+      'tape in your deck. BREAK, before it starts, puts it there\r\ndirectly instead.\r\n');
+    this.startZmodem({ name: `${name}.tap`, data: result.tap }, name);
+  }
+
+  private startUpload(): void {
+    this.mode = 'upload';
+    this.fixSource = '';
+    this.receiver = new ZmodemReceiver((bytes) => this.out([...bytes], false), (ok, files, why) => {
+      this.receiver = undefined;
+      if (this.closed) return;
+      this.mode = 'busy';
+      this.settleUntil = this.now() + SETTLE_MS;
+      if (!ok || !files.length) {
+        this.say(`\r\n\r\nNo upload${why ? `: ${why}` : ''}.\r\n`);
+        this.menu();
+        return;
+      }
+      void this.uploaded(files[0]);
+    }, { maxBytes: MAX_UPLOAD, maxFiles: 1, now: this.deps.now });
+    this.runTransfer(this.receiver);
+  }
+
+  private async uploaded(file: ZFile): Promise<void> {
+    const shown = file.name.slice(0, 30);
+    const got = uploadedProgram(file);
+    if ('error' in got) { this.say(`\r\n\r\n${shown} ${got.error}.\r\n`); this.menu(); return; }
+    const lines = got.listing.split('\n').length;
+    this.say(`\r\n\r\nGot ${got.name}, ${lines} line${lines === 1 ? '' : 's'} of BASIC. Running it...\r\n`);
+    const result = await this.deps.check('basic', got.name, got.listing);
+    if (this.closed) return;
+    this.fixErrors = result.ok ? [] : result.errors;
+    if (result.ok) this.say('It runs without an error report.\r\n');
+    else for (const line of result.errors.slice(0, 4)) this.say(`  ${line.slice(0, WIDTH - 2)}\r\n`);
+    this.progName = got.name;
+    this.fixSource = got.listing;
+    this.say('\r\nWhat is wrong with it, or what should change? One line;\r\n' +
+      'Enter alone just fixes it.\r\n\r\nFix: ');
+    this.mode = 'fix';
+    this.line = '';
+  }
+
+  /** Sends the tape by ZMODEM; if that fails, puts it in the deck instead. */
+  private startZmodem(file: ZFile, name: string): void {
+    this.mode = 'zmodem';
+    const now = this.deps.now ?? (() => Date.now());
+    this.sender = new ZmodemSender([file], (bytes) => this.out([...bytes], false), (ok, why) => {
+      this.sender = undefined;
+      if (this.closed) return;
+      this.mode = 'busy';
+      this.settleUntil = this.now() + SETTLE_MS;
+      if (ok) {
+        this.say(`\r\n\r\nTransfer complete: ${name} is on your tape. Leave the\r\n` +
+          'terminal with EDIT (the call stays up), then LOAD "".\r\n');
+      } else {
+        this.deps.deliver(name, file.data);
+        this.say(`\r\n\r\nNo ZMODEM (${why}): the tape ${name} is in your deck and\r\n` +
+          'on the shelf instead. EDIT, then LOAD "".\r\n');
+      }
+      if (this.session) this.morePrompt();
+      else this.menu();
+    }, now);
+    this.runTransfer(this.sender);
+  }
+
+  /** Starts a transfer once the text before it has gone out at 2400 baud, and ticks it. */
+  private runTransfer(t: { start(): void; tick(): void; readonly finished: boolean }): void {
+    const live = () => !this.closed && !t.finished;
+    const tick = () => {
+      if (!live()) return;
+      t.tick();
+      this.deps.schedule(tick, 1000);
+    };
+    const begin = () => {
+      if (!live()) return;
+      if (this.queue.length) { this.deps.schedule(begin, 100); return; }
+      t.start();
+      this.deps.schedule(tick, 1000);
+    };
+    begin();
   }
 }
 
